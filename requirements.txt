@@ -4,3 +4,5 @@ networkx
 folium
 streamlit-folium
 shapely
+scikit-learn
+scipy
