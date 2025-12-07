@@ -44,7 +44,7 @@ DEMO_CONFIG = {
 
 # --- 2. SETUP ---
 st.sidebar.markdown("## 🛡️ RESCUE ROUTE | AI")
-st.sidebar.caption("v3.3-SMART-SCORE")
+st.sidebar.caption("v4.4")
 
 selected_city_name = st.sidebar.selectbox(
     "📍 Select Operation Theater",
@@ -179,36 +179,22 @@ def rank_staging_areas(hazard_poly, target_lat, target_lon, assets):
             
     return selection
 
-# FIXED: Gradient Confidence Scoring
 def calculate_confidence_score(route, G, hazard_poly):
     if not route: return 0.0
     route_points = [Point(G.nodes[n]['x'], G.nodes[n]['y']) for n in route]
     route_line = LineString(route_points)
     
-    # 1. Check Intersection (Critical Failure)
     intersects = route_line.intersects(hazard_poly)
-    if intersects:
-        # If we are inside the zone, score is 0-45% based on how deep we are
-        # (Simplified: just return low score)
-        return 35.5
-
-    # 2. Check Proximity (Risk Gradient)
     dist_deg = hazard_poly.distance(route_line)
     
-    # Logic: 0.001 deg is approx 100m
-    # We want a scale where:
-    # 0m buffer = 50%
-    # 1000m buffer (0.01 deg) = 95%
-    
-    # Scale factor: 45 points spread over 0.01 degrees
-    # score = 50 + (dist / 0.01) * 45
-    
-    risk_free_distance = 0.01 # 1km
+    if intersects:
+        return 35.5 # Critical failure score
+
+    risk_free_distance = 0.01
     
     if dist_deg >= risk_free_distance:
-        return 99.2 # Maximum score
+        return 99.2
     else:
-        # Interpolate between 50 and 99
         score_boost = (dist_deg / risk_free_distance) * 49.0
         final_score = 50.0 + score_boost
         return round(final_score, 1)
@@ -246,10 +232,17 @@ if st.sidebar.button("🟢 RESET SIMULATION"):
     st.session_state.panic_edges = []
     st.rerun()
 
-# --- 8. ROUTING ENGINE ---
+# --- 8. ROUTING ENGINE (DUAL MODE) ---
 orig_node = ox.nearest_nodes(G, ACTIVE_CITY["start"][1], ACTIVE_CITY["start"][0])
 dest_node = ox.nearest_nodes(G, ACTIVE_CITY["end"][1], ACTIVE_CITY["end"][0])
 
+# ROUTE B: THE GHOST (Standard GPS)
+try:
+    route_ghost = nx.shortest_path(G, orig_node, dest_node, weight='length')
+except nx.NetworkXNoPath:
+    route_ghost = None
+
+# ROUTE A: THE AI (RescueRoute)
 G_routing = G.copy()
 
 for u, v, k in st.session_state.blocked_edges:
@@ -261,9 +254,9 @@ for u, v, k in st.session_state.panic_edges:
         G_routing[u][v][k]['length'] = G_routing[u][v][k].get('length', 10) * 50
 
 try:
-    route = nx.shortest_path(G_routing, orig_node, dest_node, weight='length')
+    route_ai = nx.shortest_path(G_routing, orig_node, dest_node, weight='length')
 except nx.NetworkXNoPath:
-    route = None
+    route_ai = None
 
 # --- 9. VISUALIZATION ---
 st.title(f"Command Center: {selected_city_name}")
@@ -279,37 +272,46 @@ else:
     m2.metric("Targeting System", "STANDBY", delta_color="off")
     m3.metric("Infra. Impact", "0", delta_color="off")
 
-if route:
-    dist = nx.path_weight(G, route, weight='length')
+# METRICS LOGIC (COMPARISON)
+if route_ai:
+    dist_ai = nx.path_weight(G, route_ai, weight='length')
+    eta_ai = int((dist_ai / 11.0) / 60) 
     
     poly = st.session_state.generated_polygon
     if poly:
-        confidence = calculate_confidence_score(route, G, poly)
+        confidence = calculate_confidence_score(route_ai, G, poly)
         
-        if confidence < 50:
-            score_color = "inverse"
-            route_color = "#FF0000"
-        elif confidence < 80:
-            score_color = "off"
-            route_color = "#FFFF00"
+        # Calculate hazards for display even if route is same
+        total_hazards = len(st.session_state.blocked_edges) + len(st.session_state.panic_edges)
+
+        # SMART COMPARISON: Check if AI path == Standard Path
+        if route_ai == route_ghost:
+            # If routes match, it means Standard Path is SAFE.
+            m4.metric("AI Confidence", f"{confidence}%", delta="Standard Route Safe", delta_color="normal")
+            st.success(f"✅ **ROUTE CLEARED:** {eta_ai} mins | Standard Corridor is Secure")
         else:
-            score_color = "normal"
-            route_color = "#00FF00"
-            
-        m4.metric("AI Confidence", f"{confidence}%", delta="Reliability", delta_color=score_color)
+            # Routes differ - show value add
+            ghost_score = calculate_confidence_score(route_ghost, G, poly)
+            if ghost_score < 40:
+                ghost_status = "CRITICAL FAIL"
+                ghost_delta = "inverse"
+            else:
+                ghost_status = "HIGH RISK"
+                ghost_delta = "off"
+                
+            m4.metric("AI Confidence", f"{confidence}%", delta=f"vs Std GPS: {ghost_status}", delta_color="normal")
+            st.success(f"✅ **AI REROUTE ACTIVE:** {eta_ai} mins | Avoids {total_hazards} Hazards")
+            st.warning(f"⚠️ **STANDARD GPS (GREY):** {ghost_status} | Route Compromised")
     else:
-        route_color = "#00FF00"
         m4.metric("AI Confidence", "100%", delta="Baseline")
-    
-    eta_seconds = dist / 11.0 
-    eta_mins = int(eta_seconds / 60)
-    st.caption(f"📏 Distance: {int(dist)}m | ⏱️ ETA: ~{eta_mins} mins")
+        st.info(f"🚀 **OPTIMAL ROUTE:** {eta_ai} mins | System Monitoring for Threats...")
 
 else:
     m4.metric("AI Confidence", "0%", delta="PATH LOST", delta_color="inverse")
 
 m = folium.Map(location=ACTIVE_CITY["center"], zoom_start=ACTIVE_CITY["zoom"], tiles="Cartodb Positron")
 
+# DRAW DISASTER & ASSETS
 if st.session_state.generated_polygon:
     fill_color = "#0000FF" if threat_type == "🌊 FLOOD" else "#8B4513"
     folium.GeoJson(
@@ -321,54 +323,37 @@ if st.session_state.generated_polygon:
     
     if "ALPHA" in staging:
         a = staging["ALPHA"]
-        folium.Marker(
-            a["coords"], 
-            icon=folium.Icon(color="red", icon="bolt", prefix="fa"), 
-            tooltip=f"<b>ALPHA: {a['name']}</b><br><i>Click for Orders</i>",
-            popup=f"<h5>⚡ TACTICAL COMMAND: ALPHA</h5><hr><b>SITE:</b> {a['name']}<br><b>MISSION:</b> {a['desc']}<br><b>CAPACITY:</b> {a['cap']}<br><b>STATUS:</b> <span style='color:green'>OPERATIONAL</span>"
-        ).add_to(m)
-
+        folium.Marker(a["coords"], icon=folium.Icon(color="red", icon="bolt", prefix="fa"), tooltip=f"ALPHA: {a['name']}").add_to(m)
     if "BRAVO" in staging:
         b = staging["BRAVO"]
-        folium.Marker(
-            b["coords"], 
-            icon=folium.Icon(color="orange", icon="helicopter", prefix="fa"), 
-            tooltip=f"<b>BRAVO: {b['name']}</b><br><i>Click for Orders</i>",
-            popup=f"<h5>🚁 TACTICAL COMMAND: BRAVO</h5><hr><b>SITE:</b> {b['name']}<br><b>MISSION:</b> {b['desc']}<br><b>CAPACITY:</b> {b['cap']}<br><b>STATUS:</b> <span style='color:green'>OPERATIONAL</span>"
-        ).add_to(m)
-
+        folium.Marker(b["coords"], icon=folium.Icon(color="orange", icon="helicopter", prefix="fa"), tooltip=f"BRAVO: {b['name']}").add_to(m)
     if "CHARLIE" in staging:
         c = staging["CHARLIE"]
-        folium.Marker(
-            c["coords"], 
-            icon=folium.Icon(color="green", icon="user-md", prefix="fa"), 
-            tooltip=f"<b>CHARLIE: {c['name']}</b><br><i>Click for Orders</i>",
-            popup=f"<h5>🏥 TACTICAL COMMAND: CHARLIE</h5><hr><b>SITE:</b> {c['name']}<br><b>MISSION:</b> {c['desc']}<br><b>CAPACITY:</b> {c['cap']}<br><b>STATUS:</b> <span style='color:green'>OPERATIONAL</span>"
-        ).add_to(m)
+        folium.Marker(c["coords"], icon=folium.Icon(color="green", icon="user-md", prefix="fa"), tooltip=f"CHARLIE: {c['name']}").add_to(m)
         
     folium.Marker(st.session_state.target_coords, icon=folium.Icon(color="red", icon="crosshairs", prefix="fa")).add_to(m)
 
 else:
     for asset in ACTIVE_CITY["assets"]:
         folium.Marker(asset["coords"], icon=folium.Icon(color="gray", icon="info-sign"), popup=asset['name']).add_to(m)
-    route_color = "#00FF00" 
 
 fail_color = "#0000cc" if threat_type == "🌊 FLOOD" else "#4a3c31"
 for u, v, k in st.session_state.blocked_edges:
     if G.has_edge(u, v, k):
         coords = [[G.nodes[u]['y'], G.nodes[u]['x']], [G.nodes[v]['y'], G.nodes[v]['x']]]
-        folium.PolyLine(coords, color=fail_color, weight=3, opacity=0.8, tooltip="CRITICAL FAILURE").add_to(m)
+        folium.PolyLine(coords, color=fail_color, weight=3, opacity=0.8).add_to(m)
 
 for u, v, k in st.session_state.panic_edges:
     if G.has_edge(u, v, k):
         coords = [[G.nodes[u]['y'], G.nodes[u]['x']], [G.nodes[v]['y'], G.nodes[v]['x']]]
-        folium.PolyLine(coords, color="#FFA500", weight=4, opacity=0.7, tooltip="GRIDLOCK / PANIC").add_to(m)
+        folium.PolyLine(coords, color="#FFA500", weight=4, opacity=0.7).add_to(m)
 
-if route:
+# DRAW ROUTE A (AI - GREEN)
+if route_ai:
     route_coords = [ACTIVE_CITY["start"]]
-    for i in range(len(route) - 1):
-        u = route[i]
-        v = route[i+1]
+    for i in range(len(route_ai) - 1):
+        u = route_ai[i]
+        v = route_ai[i+1]
         edge_data = G[u][v][0] 
         if 'geometry' in edge_data:
             geo_coords = [(lat, lon) for lon, lat in edge_data['geometry'].coords]
@@ -377,9 +362,34 @@ if route:
             route_coords.extend([(G.nodes[u]['y'], G.nodes[u]['x']), (G.nodes[v]['y'], G.nodes[v]['x'])])
     route_coords.append(ACTIVE_CITY["end"])
 
-    folium.PolyLine(route_coords, color=route_color, weight=6, opacity=0.9).add_to(m)
-    folium.Marker(ACTIVE_CITY["start"], icon=folium.Icon(color="green", icon="play")).add_to(m)
-    folium.Marker(ACTIVE_CITY["end"], icon=folium.Icon(color="blue", icon="flag")).add_to(m)
+    folium.PolyLine(route_coords, color="#00FF00", weight=6, opacity=0.9, tooltip="AI SAFE ROUTE").add_to(m)
+
+# DRAW ROUTE B (GHOST - GREY)
+# FIXED: Check if routes differ to prevent Z-Fighting
+if route_ghost and st.session_state.generated_polygon and route_ghost != route_ai:
+    ghost_coords = [ACTIVE_CITY["start"]]
+    for i in range(len(route_ghost) - 1):
+        u = route_ghost[i]
+        v = route_ghost[i+1]
+        edge_data = G[u][v][0] 
+        if 'geometry' in edge_data:
+            geo_coords = [(lat, lon) for lon, lat in edge_data['geometry'].coords]
+            ghost_coords.extend(geo_coords)
+        else:
+            ghost_coords.extend([(G.nodes[u]['y'], G.nodes[u]['x']), (G.nodes[v]['y'], G.nodes[v]['x'])])
+    ghost_coords.append(ACTIVE_CITY["end"])
+
+    folium.PolyLine(
+        ghost_coords, 
+        color="#333333", # Dark Grey (High Contrast)
+        weight=5, 
+        opacity=0.8, 
+        dash_array="10, 10", 
+        tooltip="⚠️ STANDARD GPS (DANGEROUS)"
+    ).add_to(m)
+
+folium.Marker(ACTIVE_CITY["start"], icon=folium.Icon(color="green", icon="play")).add_to(m)
+folium.Marker(ACTIVE_CITY["end"], icon=folium.Icon(color="blue", icon="flag")).add_to(m)
 
 map_output = st_folium(m, width=1000, height=500, returned_objects=["last_clicked"])
 
