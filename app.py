@@ -18,12 +18,36 @@ DEMO_CONFIG = {
         "end": (33.7756, -84.4030),
         "zoom": 14,
         "assets": [
-            {"name": "Bobby Dodd Stadium", "type": "STADIUM", "coords": (33.7724, -84.3928), "cap": "High", "desc": "Heavy Airlift / Mass Shelter"},
-            {"name": "Piedmont Park (South)", "type": "PARK", "coords": (33.7838, -84.3755), "cap": "Massive", "desc": "Field Hospital / Triage"},
-            {"name": "Emory Midtown Hosp.", "type": "MEDICAL", "coords": (33.7692, -84.3865), "cap": "Critical", "desc": "Trauma Center / ICU"},
-            {"name": "Atlantic Station Deck", "type": "PARKING", "coords": (33.7922, -84.3967), "cap": "High", "desc": "Vehicle Staging / Logistics"},
-            {"name": "Centennial Olympic Park", "type": "PARK", "coords": (33.7603, -84.3935), "cap": "Massive", "desc": "Command Post Alpha"},
-            {"name": "Coca-Cola HQ Plaza", "type": "COMMERCIAL", "coords": (33.7709, -84.3965), "cap": "Medium", "desc": "Civilian Evac Point"}
+            {
+                "name": "Bobby Dodd Stadium", "type": "STADIUM", "coords": (33.7724, -84.3928), 
+                "cap": "High", "desc": "Heavy Airlift / Mass Shelter",
+                "supplies": ["Heavy Lift Drones", "Mass Shelter Tents (500)", "MREs (10k units)"]
+            },
+            {
+                "name": "Piedmont Park (South)", "type": "PARK", "coords": (33.7838, -84.3755), 
+                "cap": "Massive", "desc": "Field Hospital / Triage",
+                "supplies": ["Inflatable Triage Tents", "Water Tankers (5)", "Starlink Relay"]
+            },
+            {
+                "name": "Emory Midtown Hosp.", "type": "MEDICAL", "coords": (33.7692, -84.3865), 
+                "cap": "Critical", "desc": "Trauma Center / ICU",
+                "supplies": ["L1 Trauma Kits", "O- Blood Supply", "Surgical Units"]
+            },
+            {
+                "name": "Atlantic Station Deck", "type": "PARKING", "coords": (33.7922, -84.3967), 
+                "cap": "High", "desc": "Vehicle Staging / Logistics",
+                "supplies": ["Ambulance Fleet (20)", "Fuel Tankers", "Generators"]
+            },
+            {
+                "name": "Centennial Olympic Park", "type": "PARK", "coords": (33.7603, -84.3935), 
+                "cap": "Massive", "desc": "Command Post Alpha",
+                "supplies": ["Mobile Command Unit", "Radio Repeaters", "Riot Gear"]
+            },
+            {
+                "name": "Coca-Cola HQ Plaza", "type": "COMMERCIAL", "coords": (33.7709, -84.3965), 
+                "cap": "Medium", "desc": "Civilian Evac Point",
+                "supplies": ["Bus Fleet", "Water Bottles", "Blankets"]
+            }
         ]
     },
     "🇮🇳 MUMBAI (Sector 9)": {
@@ -32,19 +56,43 @@ DEMO_CONFIG = {
         "end": (18.9430, 72.8230),
         "zoom": 14,
         "assets": [
-            {"name": "Wankhede Stadium", "type": "STADIUM", "coords": (18.9389, 72.8258), "cap": "High", "desc": "Mass Casualty / Helipad"},
-            {"name": "Brabourne Stadium", "type": "STADIUM", "coords": (18.9322, 72.8275), "cap": "High", "desc": "Secondary Shelter Zone"},
-            {"name": "Bombay Hospital", "type": "MEDICAL", "coords": (18.9416, 72.8291), "cap": "Critical", "desc": "L1 Trauma / Surgery"},
-            {"name": "Azad Maidan", "type": "PARK", "coords": (18.9360, 72.8310), "cap": "Massive", "desc": "Riot Control / Triage"},
-            {"name": "Cross Maidan", "type": "PARK", "coords": (18.9330, 72.8280), "cap": "High", "desc": "Logistics Hub"},
-            {"name": "Oval Maidan", "type": "PARK", "coords": (18.9300, 72.8280), "cap": "Massive", "desc": "Civilian Assembly Area"}
+            {
+                "name": "Wankhede Stadium", "type": "STADIUM", "coords": (18.9389, 72.8258), 
+                "cap": "High", "desc": "Mass Casualty / Helipad",
+                "supplies": ["Heavy Lift Helos", "Flood Lights", "MREs (20k units)"]
+            },
+            {
+                "name": "Brabourne Stadium", "type": "STADIUM", "coords": (18.9322, 72.8275), 
+                "cap": "High", "desc": "Secondary Shelter Zone",
+                "supplies": ["Cots (2000)", "Hygiene Kits", "Water Purification"]
+            },
+            {
+                "name": "Bombay Hospital", "type": "MEDICAL", "coords": (18.9416, 72.8291), 
+                "cap": "Critical", "desc": "L1 Trauma / Surgery",
+                "supplies": ["Antivenom", "Surgical Teams", "Oxygen Tanks"]
+            },
+            {
+                "name": "Azad Maidan", "type": "PARK", "coords": (18.9360, 72.8310), 
+                "cap": "Massive", "desc": "Riot Control / Triage",
+                "supplies": ["Barricades", "Megaphones", "First Aid Posts"]
+            },
+            {
+                "name": "Cross Maidan", "type": "PARK", "coords": (18.9330, 72.8280), 
+                "cap": "High", "desc": "Logistics Hub",
+                "supplies": ["Truck Fleet", "Sandbags", "Shovels"]
+            },
+            {
+                "name": "Oval Maidan", "type": "PARK", "coords": (18.9300, 72.8280), 
+                "cap": "Massive", "desc": "Civilian Assembly Area",
+                "supplies": ["Evac Buses", "Food Packets", "Info Kiosks"]
+            }
         ]
     }
 }
 
 # --- 2. SETUP ---
 st.sidebar.markdown("## 🛡️ RESCUE ROUTE | AI")
-st.sidebar.caption("v4.4")
+st.sidebar.caption("v5.2-LIVE-OPS")
 
 selected_city_name = st.sidebar.selectbox(
     "📍 Select Operation Theater",
@@ -71,6 +119,7 @@ if st.session_state.last_city != selected_city_name:
     st.session_state.generated_polygon = None
     st.session_state.blocked_edges = [] 
     st.session_state.panic_edges = []   
+    st.session_state.manual_incidents = [] # FEATURE 2: List of manual blocks
     st.session_state.last_city = selected_city_name
     st.rerun()
 
@@ -82,6 +131,8 @@ if 'blocked_edges' not in st.session_state:
     st.session_state.blocked_edges = []
 if 'panic_edges' not in st.session_state:
     st.session_state.panic_edges = []
+if 'manual_incidents' not in st.session_state:
+    st.session_state.manual_incidents = []
 
 if 'last_threat_type' not in st.session_state:
     st.session_state.last_threat_type = "🌊 FLOOD" 
@@ -102,7 +153,9 @@ def generate_disaster_zone(center_lat, center_lon, type, intensity):
             lon = center_lon + r * math.sin(angle)
             points.append((lon, lat))
     else:
-        base_radius = intensity * 0.002
+        # FEATURE 1: SCIENTIFIC FLOOD METRIC
+        base_radius = intensity * 0.0000025
+        
         for i in range(num_points):
             angle = math.radians(float(i) / num_points * 360)
             noise = random.uniform(0.9, 1.1)
@@ -179,38 +232,64 @@ def rank_staging_areas(hazard_poly, target_lat, target_lon, assets):
             
     return selection
 
-def calculate_confidence_score(route, G, hazard_poly):
+def calculate_confidence_score(route, G, hazard_poly, manual_blocks):
     if not route: return 0.0
     route_points = [Point(G.nodes[n]['x'], G.nodes[n]['y']) for n in route]
     route_line = LineString(route_points)
     
+    # 1. Disaster Zone Impact
     intersects = route_line.intersects(hazard_poly)
     dist_deg = hazard_poly.distance(route_line)
     
+    # 2. Manual Block Impact
+    # Simplistic check: does route pass near a manual block?
+    # In real app, we check edge IDs, but this is a visual proxy score
+    manual_penalty = 0
+    for lat, lng in manual_blocks:
+        block_point = Point(lng, lat)
+        if route_line.distance(block_point) < 0.0001: # Very close (~10m)
+            manual_penalty = 50 # Massive hit if we failed to route around
+            
     if intersects:
         return 35.5 # Critical failure score
 
     risk_free_distance = 0.01
     
     if dist_deg >= risk_free_distance:
-        return 99.2
+        base_score = 99.2
     else:
         score_boost = (dist_deg / risk_free_distance) * 49.0
-        final_score = 50.0 + score_boost
-        return round(final_score, 1)
+        base_score = 50.0 + score_boost
+        
+    final_score = base_score - manual_penalty
+    return round(max(0, min(final_score, 99.4)), 1)
 
 # --- 7. SIDEBAR ---
 st.sidebar.markdown("---")
-st.sidebar.subheader("🕹️ Threat Parametrics")
-threat_type = st.sidebar.radio("Threat Model", ["🌊 FLOOD", "🌋 EARTHQUAKE"])
+st.sidebar.subheader("🕹️ Command Interface")
 
-if threat_type == "🌊 FLOOD":
-    intensity = st.sidebar.slider("Water Level (Severity)", 1, 10, 5)
+# FEATURE 2: INTERACTION MODE SWITCHER
+interaction_mode = st.sidebar.radio("Map Interaction Mode", ["🔴 THREAT GENERATOR", "⚠️ REPORT INCIDENT"])
+
+if interaction_mode == "🔴 THREAT GENERATOR":
+    st.sidebar.caption("Click map to simulate Disaster.")
+    threat_type = st.sidebar.radio("Threat Model", ["🌊 FLOOD", "🌋 EARTHQUAKE"])
+    if threat_type == "🌊 FLOOD":
+        intensity = st.sidebar.slider("River Discharge (m³/s)", 500, 10000, 2500, step=500)
+    else:
+        intensity = st.sidebar.slider("Seismic Magnitude", 4.0, 9.0, 6.5)
 else:
-    intensity = st.sidebar.slider("Seismic Magnitude", 4.0, 9.0, 6.5)
+    st.sidebar.caption("Click map to report road blockage.")
+    if st.sidebar.button("Undo Last Incident"):
+        if st.session_state.manual_incidents:
+            st.session_state.manual_incidents.pop()
+            st.rerun()
+    # Default values for safety if mode switches
+    threat_type = st.session_state.last_threat_type
+    intensity = st.session_state.last_intensity
 
-# AUTO-REFRESH LOGIC
-if st.session_state.target_coords:
+# AUTO-REFRESH LOGIC (Only in Generator Mode)
+if st.session_state.target_coords and interaction_mode == "🔴 THREAT GENERATOR":
     if (threat_type != st.session_state.last_threat_type) or (intensity != st.session_state.last_intensity):
         st.session_state.last_threat_type = threat_type
         st.session_state.last_intensity = intensity
@@ -230,6 +309,7 @@ if st.sidebar.button("🟢 RESET SIMULATION"):
     st.session_state.generated_polygon = None
     st.session_state.blocked_edges = []
     st.session_state.panic_edges = []
+    st.session_state.manual_incidents = []
     st.rerun()
 
 # --- 8. ROUTING ENGINE (DUAL MODE) ---
@@ -245,6 +325,7 @@ except nx.NetworkXNoPath:
 # ROUTE A: THE AI (RescueRoute)
 G_routing = G.copy()
 
+# 1. Apply Disaster Blocks
 for u, v, k in st.session_state.blocked_edges:
     if G_routing.has_edge(u, v, k):
         G_routing[u][v][k]['length'] = G_routing[u][v][k].get('length', 10) * 100000
@@ -252,6 +333,14 @@ for u, v, k in st.session_state.blocked_edges:
 for u, v, k in st.session_state.panic_edges:
     if G_routing.has_edge(u, v, k):
         G_routing[u][v][k]['length'] = G_routing[u][v][k].get('length', 10) * 50
+
+# 2. FEATURE 2: Apply Manual Blocks
+for lat, lng in st.session_state.manual_incidents:
+    # Find nearest node to the click
+    block_node = ox.nearest_nodes(G, lng, lat)
+    # Block all edges connected to this node
+    for u, v, k in G_routing.edges(block_node, keys=True):
+        G_routing[u][v][k]['length'] = G_routing[u][v][k].get('length', 10) * 1000000
 
 try:
     route_ai = nx.shortest_path(G_routing, orig_node, dest_node, weight='length')
@@ -266,7 +355,7 @@ m1.metric("System Status", "ONLINE", delta="Local: 12ms")
 
 if st.session_state.target_coords:
     m2.metric("Target Locked", "ACTIVE", delta="Tracking")
-    total_impact = len(st.session_state.blocked_edges) + len(st.session_state.panic_edges)
+    total_impact = len(st.session_state.blocked_edges) + len(st.session_state.panic_edges) + len(st.session_state.manual_incidents)
     m3.metric("Infra. Impact", f"{total_impact} Segments", delta="CRITICAL", delta_color="inverse")
 else:
     m2.metric("Targeting System", "STANDBY", delta_color="off")
@@ -279,19 +368,15 @@ if route_ai:
     
     poly = st.session_state.generated_polygon
     if poly:
-        confidence = calculate_confidence_score(route_ai, G, poly)
-        
-        # Calculate hazards for display even if route is same
-        total_hazards = len(st.session_state.blocked_edges) + len(st.session_state.panic_edges)
+        confidence = calculate_confidence_score(route_ai, G, poly, st.session_state.manual_incidents)
+        total_hazards = len(st.session_state.blocked_edges) + len(st.session_state.panic_edges) + len(st.session_state.manual_incidents)
 
         # SMART COMPARISON: Check if AI path == Standard Path
         if route_ai == route_ghost:
-            # If routes match, it means Standard Path is SAFE.
             m4.metric("AI Confidence", f"{confidence}%", delta="Standard Route Safe", delta_color="normal")
             st.success(f"✅ **ROUTE CLEARED:** {eta_ai} mins | Standard Corridor is Secure")
         else:
-            # Routes differ - show value add
-            ghost_score = calculate_confidence_score(route_ghost, G, poly)
+            ghost_score = calculate_confidence_score(route_ghost, G, poly, st.session_state.manual_incidents)
             if ghost_score < 40:
                 ghost_status = "CRITICAL FAIL"
                 ghost_delta = "inverse"
@@ -321,15 +406,36 @@ if st.session_state.generated_polygon:
     
     staging = rank_staging_areas(st.session_state.generated_polygon, ACTIVE_CITY["end"][0], ACTIVE_CITY["end"][1], ACTIVE_CITY["assets"])
     
+    # FEATURE 3: LOGISTICS POPUPS
     if "ALPHA" in staging:
         a = staging["ALPHA"]
-        folium.Marker(a["coords"], icon=folium.Icon(color="red", icon="bolt", prefix="fa"), tooltip=f"ALPHA: {a['name']}").add_to(m)
+        supplies_str = "<br>• ".join(a['supplies'])
+        folium.Marker(
+            a["coords"], 
+            icon=folium.Icon(color="red", icon="bolt", prefix="fa"), 
+            tooltip=f"<b>ALPHA: {a['name']}</b><br><i>Click for Logistics</i>",
+            popup=f"<div style='min-width: 300px;'><h5>⚡ TACTICAL COMMAND: ALPHA</h5><hr><b>SITE:</b> {a['name']}<br><b>MISSION:</b> {a['desc']}<br><b>CAPACITY:</b> {a['cap']}<br><b>STATUS:</b> <span style='color:green'>OPERATIONAL</span><hr><b>📦 SUPPLY CACHE:</b><br>• {supplies_str}</div>"
+        ).add_to(m)
+
     if "BRAVO" in staging:
         b = staging["BRAVO"]
-        folium.Marker(b["coords"], icon=folium.Icon(color="orange", icon="helicopter", prefix="fa"), tooltip=f"BRAVO: {b['name']}").add_to(m)
+        supplies_str = "<br>• ".join(b['supplies'])
+        folium.Marker(
+            b["coords"], 
+            icon=folium.Icon(color="orange", icon="helicopter", prefix="fa"), 
+            tooltip=f"<b>BRAVO: {b['name']}</b><br><i>Click for Logistics</i>",
+            popup=f"<div style='min-width: 300px;'><h5>🚁 TACTICAL COMMAND: BRAVO</h5><hr><b>SITE:</b> {b['name']}<br><b>MISSION:</b> {b['desc']}<br><b>CAPACITY:</b> {b['cap']}<br><b>STATUS:</b> <span style='color:green'>OPERATIONAL</span><hr><b>📦 SUPPLY CACHE:</b><br>• {supplies_str}</div>"
+        ).add_to(m)
+
     if "CHARLIE" in staging:
         c = staging["CHARLIE"]
-        folium.Marker(c["coords"], icon=folium.Icon(color="green", icon="user-md", prefix="fa"), tooltip=f"CHARLIE: {c['name']}").add_to(m)
+        supplies_str = "<br>• ".join(c['supplies'])
+        folium.Marker(
+            c["coords"], 
+            icon=folium.Icon(color="green", icon="user-md", prefix="fa"), 
+            tooltip=f"<b>CHARLIE: {c['name']}</b><br><i>Click for Logistics</i>",
+            popup=f"<div style='min-width: 300px;'><h5>🏥 TACTICAL COMMAND: CHARLIE</h5><hr><b>SITE:</b> {c['name']}<br><b>MISSION:</b> {c['desc']}<br><b>CAPACITY:</b> {c['cap']}<br><b>STATUS:</b> <span style='color:green'>OPERATIONAL</span><hr><b>📦 SUPPLY CACHE:</b><br>• {supplies_str}</div>"
+        ).add_to(m)
         
     folium.Marker(st.session_state.target_coords, icon=folium.Icon(color="red", icon="crosshairs", prefix="fa")).add_to(m)
 
@@ -348,6 +454,14 @@ for u, v, k in st.session_state.panic_edges:
         coords = [[G.nodes[u]['y'], G.nodes[u]['x']], [G.nodes[v]['y'], G.nodes[v]['x']]]
         folium.PolyLine(coords, color="#FFA500", weight=4, opacity=0.7).add_to(m)
 
+# FEATURE 2: VISUALIZE MANUAL BLOCKS
+for lat, lng in st.session_state.manual_incidents:
+    folium.Marker(
+        [lat, lng],
+        icon=folium.Icon(color="black", icon="ban", prefix="fa"),
+        tooltip="<b>INCIDENT REPORTED</b><br>Manual Override"
+    ).add_to(m)
+
 # DRAW ROUTE A (AI - GREEN)
 if route_ai:
     route_coords = [ACTIVE_CITY["start"]]
@@ -365,7 +479,6 @@ if route_ai:
     folium.PolyLine(route_coords, color="#00FF00", weight=6, opacity=0.9, tooltip="AI SAFE ROUTE").add_to(m)
 
 # DRAW ROUTE B (GHOST - GREY)
-# FIXED: Check if routes differ to prevent Z-Fighting
 if route_ghost and st.session_state.generated_polygon and route_ghost != route_ai:
     ghost_coords = [ACTIVE_CITY["start"]]
     for i in range(len(route_ghost) - 1):
@@ -397,14 +510,24 @@ if map_output['last_clicked']:
     clicked_lat = map_output['last_clicked']['lat']
     clicked_lng = map_output['last_clicked']['lng']
     
-    if st.session_state.target_coords != (clicked_lat, clicked_lng):
-        st.session_state.target_coords = (clicked_lat, clicked_lng)
-        
-        poly = generate_disaster_zone(clicked_lat, clicked_lng, threat_type, intensity)
-        st.session_state.generated_polygon = poly
-        
-        blocked, panic = detect_impact(G, poly, threat_type)
-        st.session_state.blocked_edges = blocked
-        st.session_state.panic_edges = panic
-        
-        st.rerun()
+    # CLICK HANDLER LOGIC
+    if interaction_mode == "🔴 THREAT GENERATOR":
+        if st.session_state.target_coords != (clicked_lat, clicked_lng):
+            st.session_state.target_coords = (clicked_lat, clicked_lng)
+            
+            poly = generate_disaster_zone(clicked_lat, clicked_lng, threat_type, intensity)
+            st.session_state.generated_polygon = poly
+            
+            blocked, panic = detect_impact(G, poly, threat_type)
+            st.session_state.blocked_edges = blocked
+            st.session_state.panic_edges = panic
+            
+            st.rerun()
+            
+    elif interaction_mode == "⚠️ REPORT INCIDENT":
+        # Add new manual incident
+        # Check if point is new (simple de-bounce)
+        new_point = (clicked_lat, clicked_lng)
+        if new_point not in st.session_state.manual_incidents:
+            st.session_state.manual_incidents.append(new_point)
+            st.rerun()
