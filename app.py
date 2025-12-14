@@ -92,7 +92,7 @@ DEMO_CONFIG = {
 
 # --- 2. SETUP ---
 st.sidebar.markdown("## 🛡️ RESCUE ROUTE | AI")
-st.sidebar.caption("v5.2-LIVE-OPS")
+st.sidebar.caption("v6.1")
 
 selected_city_name = st.sidebar.selectbox(
     "📍 Select Operation Theater",
@@ -119,7 +119,7 @@ if st.session_state.last_city != selected_city_name:
     st.session_state.generated_polygon = None
     st.session_state.blocked_edges = [] 
     st.session_state.panic_edges = []   
-    st.session_state.manual_incidents = [] # FEATURE 2: List of manual blocks
+    st.session_state.manual_incidents = []
     st.session_state.last_city = selected_city_name
     st.rerun()
 
@@ -232,43 +232,55 @@ def rank_staging_areas(hazard_poly, target_lat, target_lon, assets):
             
     return selection
 
-def calculate_confidence_score(route, G, hazard_poly, manual_blocks):
+def calculate_confidence_score(route, G, hazard_poly, manual_blocks, ghost_route=None):
     if not route: return 0.0
     route_points = [Point(G.nodes[n]['x'], G.nodes[n]['y']) for n in route]
     route_line = LineString(route_points)
     
-    # 1. Disaster Zone Impact
+    # --- 1. SAFETY CHECK ---
     intersects = route_line.intersects(hazard_poly)
     dist_deg = hazard_poly.distance(route_line)
     
-    # 2. Manual Block Impact
-    # Simplistic check: does route pass near a manual block?
-    # In real app, we check edge IDs, but this is a visual proxy score
+    # Manual Block Penalty
     manual_penalty = 0
     for lat, lng in manual_blocks:
         block_point = Point(lng, lat)
-        if route_line.distance(block_point) < 0.0001: # Very close (~10m)
-            manual_penalty = 50 # Massive hit if we failed to route around
+        if route_line.distance(block_point) < 0.0001: 
+            manual_penalty = 50 
             
     if intersects:
-        return 35.5 # Critical failure score
-
-    risk_free_distance = 0.01
-    
-    if dist_deg >= risk_free_distance:
-        base_score = 99.2
+        base_score = 35.5 
     else:
-        score_boost = (dist_deg / risk_free_distance) * 49.0
-        base_score = 50.0 + score_boost
+        risk_free_distance = 0.01
+        if dist_deg >= risk_free_distance:
+            base_score = 99.2
+        else:
+            score_boost = (dist_deg / risk_free_distance) * 49.0
+            base_score = 50.0 + score_boost
+    
+    safety_score = base_score - manual_penalty
+
+    # --- 2. EFFICIENCY CHECK (NEW) ---
+    efficiency_penalty = 0
+    if ghost_route:
+        # Calculate lengths
+        ai_len = nx.path_weight(G, route, weight='length')
+        ghost_len = nx.path_weight(G, ghost_route, weight='length')
         
-    final_score = base_score - manual_penalty
+        if ghost_len > 0:
+            ratio = ai_len / ghost_len
+            # If AI route is > 20% longer, start penalizing
+            if ratio > 1.2:
+                # Cap penalty at 15 points
+                efficiency_penalty = min(15, (ratio - 1.2) * 20)
+    
+    final_score = safety_score - efficiency_penalty
     return round(max(0, min(final_score, 99.4)), 1)
 
 # --- 7. SIDEBAR ---
 st.sidebar.markdown("---")
 st.sidebar.subheader("🕹️ Command Interface")
 
-# FEATURE 2: INTERACTION MODE SWITCHER
 interaction_mode = st.sidebar.radio("Map Interaction Mode", ["🔴 THREAT GENERATOR", "⚠️ REPORT INCIDENT"])
 
 if interaction_mode == "🔴 THREAT GENERATOR":
@@ -284,11 +296,10 @@ else:
         if st.session_state.manual_incidents:
             st.session_state.manual_incidents.pop()
             st.rerun()
-    # Default values for safety if mode switches
     threat_type = st.session_state.last_threat_type
     intensity = st.session_state.last_intensity
 
-# AUTO-REFRESH LOGIC (Only in Generator Mode)
+# AUTO-REFRESH LOGIC
 if st.session_state.target_coords and interaction_mode == "🔴 THREAT GENERATOR":
     if (threat_type != st.session_state.last_threat_type) or (intensity != st.session_state.last_intensity):
         st.session_state.last_threat_type = threat_type
@@ -312,42 +323,36 @@ if st.sidebar.button("🟢 RESET SIMULATION"):
     st.session_state.manual_incidents = []
     st.rerun()
 
-# --- 8. ROUTING ENGINE (DUAL MODE) ---
+# --- 8. ROUTING ENGINE ---
 orig_node = ox.nearest_nodes(G, ACTIVE_CITY["start"][1], ACTIVE_CITY["start"][0])
 dest_node = ox.nearest_nodes(G, ACTIVE_CITY["end"][1], ACTIVE_CITY["end"][0])
 
-# ROUTE B: THE GHOST (Standard GPS)
+# --- ROUTE A: THE GHOST (Standard GPS) ---
 try:
     route_ghost = nx.shortest_path(G, orig_node, dest_node, weight='length')
 except nx.NetworkXNoPath:
     route_ghost = None
 
-# ROUTE A: THE AI (RescueRoute)
-G_routing = G.copy()
-
-# 1. Apply Disaster Blocks
+# --- ROUTE B: AI SECURE (The One True Path) ---
+G_secure = G.copy()
 for u, v, k in st.session_state.blocked_edges:
-    if G_routing.has_edge(u, v, k):
-        G_routing[u][v][k]['length'] = G_routing[u][v][k].get('length', 10) * 100000
-
+    if G_secure.has_edge(u, v, k):
+        G_secure[u][v][k]['length'] = 1e9 # Effectively blocked
 for u, v, k in st.session_state.panic_edges:
-    if G_routing.has_edge(u, v, k):
-        G_routing[u][v][k]['length'] = G_routing[u][v][k].get('length', 10) * 50
-
-# 2. FEATURE 2: Apply Manual Blocks
+    if G_secure.has_edge(u, v, k):
+        G_secure[u][v][k]['length'] = G_secure[u][v][k].get('length', 10) * 50 # High penalty
+# Manual Blocks
 for lat, lng in st.session_state.manual_incidents:
-    # Find nearest node to the click
     block_node = ox.nearest_nodes(G, lng, lat)
-    # Block all edges connected to this node
-    for u, v, k in G_routing.edges(block_node, keys=True):
-        G_routing[u][v][k]['length'] = G_routing[u][v][k].get('length', 10) * 1000000
+    for u, v, k in G_secure.edges(block_node, keys=True):
+        G_secure[u][v][k]['length'] = 1e9
 
 try:
-    route_ai = nx.shortest_path(G_routing, orig_node, dest_node, weight='length')
+    route_ai = nx.shortest_path(G_secure, orig_node, dest_node, weight='length')
 except nx.NetworkXNoPath:
     route_ai = None
 
-# --- 9. VISUALIZATION ---
+# --- 9. VISUALIZATION & METRICS ---
 st.title(f"Command Center: {selected_city_name}")
 
 m1, m2, m3, m4 = st.columns(4)
@@ -361,42 +366,45 @@ else:
     m2.metric("Targeting System", "STANDBY", delta_color="off")
     m3.metric("Infra. Impact", "0", delta_color="off")
 
-# METRICS LOGIC (COMPARISON)
+# METRICS DISPLAY
 if route_ai:
+    # Calculate Real Distances
     dist_ai = nx.path_weight(G, route_ai, weight='length')
-    eta_ai = int((dist_ai / 11.0) / 60) 
+    eta_ai = int((dist_ai / 11.0) / 60)
     
     poly = st.session_state.generated_polygon
     if poly:
-        confidence = calculate_confidence_score(route_ai, G, poly, st.session_state.manual_incidents)
+        # Pass ghost route for efficiency comparison
+        confidence = calculate_confidence_score(route_ai, G, poly, st.session_state.manual_incidents, route_ghost)
         total_hazards = len(st.session_state.blocked_edges) + len(st.session_state.panic_edges) + len(st.session_state.manual_incidents)
-
-        # SMART COMPARISON: Check if AI path == Standard Path
+        
         if route_ai == route_ghost:
             m4.metric("AI Confidence", f"{confidence}%", delta="Standard Route Safe", delta_color="normal")
             st.success(f"✅ **ROUTE CLEARED:** {eta_ai} mins | Standard Corridor is Secure")
         else:
-            ghost_score = calculate_confidence_score(route_ghost, G, poly, st.session_state.manual_incidents)
+            # Ghost comparison logic
+            ghost_score = calculate_confidence_score(route_ghost, G, poly, st.session_state.manual_incidents, None)
             if ghost_score < 40:
                 ghost_status = "CRITICAL FAIL"
                 ghost_delta = "inverse"
             else:
                 ghost_status = "HIGH RISK"
                 ghost_delta = "off"
-                
+            
             m4.metric("AI Confidence", f"{confidence}%", delta=f"vs Std GPS: {ghost_status}", delta_color="normal")
             st.success(f"✅ **AI REROUTE ACTIVE:** {eta_ai} mins | Avoids {total_hazards} Hazards")
             st.warning(f"⚠️ **STANDARD GPS (GREY):** {ghost_status} | Route Compromised")
+            
     else:
         m4.metric("AI Confidence", "100%", delta="Baseline")
-        st.info(f"🚀 **OPTIMAL ROUTE:** {eta_ai} mins | System Monitoring for Threats...")
+        st.info(f"🚀 **OPTIMAL ROUTE:** {eta_ai} mins")
 
 else:
     m4.metric("AI Confidence", "0%", delta="PATH LOST", delta_color="inverse")
 
 m = folium.Map(location=ACTIVE_CITY["center"], zoom_start=ACTIVE_CITY["zoom"], tiles="Cartodb Positron")
 
-# DRAW DISASTER & ASSETS
+# DRAW DISASTER
 if st.session_state.generated_polygon:
     fill_color = "#0000FF" if threat_type == "🌊 FLOOD" else "#8B4513"
     folium.GeoJson(
@@ -406,36 +414,18 @@ if st.session_state.generated_polygon:
     
     staging = rank_staging_areas(st.session_state.generated_polygon, ACTIVE_CITY["end"][0], ACTIVE_CITY["end"][1], ACTIVE_CITY["assets"])
     
-    # FEATURE 3: LOGISTICS POPUPS
     if "ALPHA" in staging:
         a = staging["ALPHA"]
         supplies_str = "<br>• ".join(a['supplies'])
-        folium.Marker(
-            a["coords"], 
-            icon=folium.Icon(color="red", icon="bolt", prefix="fa"), 
-            tooltip=f"<b>ALPHA: {a['name']}</b><br><i>Click for Logistics</i>",
-            popup=f"<div style='min-width: 300px;'><h5>⚡ TACTICAL COMMAND: ALPHA</h5><hr><b>SITE:</b> {a['name']}<br><b>MISSION:</b> {a['desc']}<br><b>CAPACITY:</b> {a['cap']}<br><b>STATUS:</b> <span style='color:green'>OPERATIONAL</span><hr><b>📦 SUPPLY CACHE:</b><br>• {supplies_str}</div>"
-        ).add_to(m)
-
+        folium.Marker(a["coords"], icon=folium.Icon(color="red", icon="bolt", prefix="fa"), popup=f"<div style='min-width: 300px;'><h5>⚡ ALPHA</h5><hr>{supplies_str}</div>").add_to(m)
     if "BRAVO" in staging:
         b = staging["BRAVO"]
         supplies_str = "<br>• ".join(b['supplies'])
-        folium.Marker(
-            b["coords"], 
-            icon=folium.Icon(color="orange", icon="helicopter", prefix="fa"), 
-            tooltip=f"<b>BRAVO: {b['name']}</b><br><i>Click for Logistics</i>",
-            popup=f"<div style='min-width: 300px;'><h5>🚁 TACTICAL COMMAND: BRAVO</h5><hr><b>SITE:</b> {b['name']}<br><b>MISSION:</b> {b['desc']}<br><b>CAPACITY:</b> {b['cap']}<br><b>STATUS:</b> <span style='color:green'>OPERATIONAL</span><hr><b>📦 SUPPLY CACHE:</b><br>• {supplies_str}</div>"
-        ).add_to(m)
-
+        folium.Marker(b["coords"], icon=folium.Icon(color="orange", icon="helicopter", prefix="fa"), popup=f"<div style='min-width: 300px;'><h5>🚁 BRAVO</h5><hr>{supplies_str}</div>").add_to(m)
     if "CHARLIE" in staging:
         c = staging["CHARLIE"]
         supplies_str = "<br>• ".join(c['supplies'])
-        folium.Marker(
-            c["coords"], 
-            icon=folium.Icon(color="green", icon="user-md", prefix="fa"), 
-            tooltip=f"<b>CHARLIE: {c['name']}</b><br><i>Click for Logistics</i>",
-            popup=f"<div style='min-width: 300px;'><h5>🏥 TACTICAL COMMAND: CHARLIE</h5><hr><b>SITE:</b> {c['name']}<br><b>MISSION:</b> {c['desc']}<br><b>CAPACITY:</b> {c['cap']}<br><b>STATUS:</b> <span style='color:green'>OPERATIONAL</span><hr><b>📦 SUPPLY CACHE:</b><br>• {supplies_str}</div>"
-        ).add_to(m)
+        folium.Marker(c["coords"], icon=folium.Icon(color="green", icon="user-md", prefix="fa"), popup=f"<div style='min-width: 300px;'><h5>🏥 CHARLIE</h5><hr>{supplies_str}</div>").add_to(m)
         
     folium.Marker(st.session_state.target_coords, icon=folium.Icon(color="red", icon="crosshairs", prefix="fa")).add_to(m)
 
@@ -443,6 +433,7 @@ else:
     for asset in ACTIVE_CITY["assets"]:
         folium.Marker(asset["coords"], icon=folium.Icon(color="gray", icon="info-sign"), popup=asset['name']).add_to(m)
 
+# DRAW IMPACT EDGES
 fail_color = "#0000cc" if threat_type == "🌊 FLOOD" else "#4a3c31"
 for u, v, k in st.session_state.blocked_edges:
     if G.has_edge(u, v, k):
@@ -454,15 +445,11 @@ for u, v, k in st.session_state.panic_edges:
         coords = [[G.nodes[u]['y'], G.nodes[u]['x']], [G.nodes[v]['y'], G.nodes[v]['x']]]
         folium.PolyLine(coords, color="#FFA500", weight=4, opacity=0.7).add_to(m)
 
-# FEATURE 2: VISUALIZE MANUAL BLOCKS
+# MANUAL INCIDENTS
 for lat, lng in st.session_state.manual_incidents:
-    folium.Marker(
-        [lat, lng],
-        icon=folium.Icon(color="black", icon="ban", prefix="fa"),
-        tooltip="<b>INCIDENT REPORTED</b><br>Manual Override"
-    ).add_to(m)
+    folium.Marker([lat, lng], icon=folium.Icon(color="black", icon="ban", prefix="fa"), tooltip="INCIDENT").add_to(m)
 
-# DRAW ROUTE A (AI - GREEN)
+# DRAW ROUTE A (SECURE - GREEN)
 if route_ai:
     route_coords = [ACTIVE_CITY["start"]]
     for i in range(len(route_ai) - 1):
@@ -475,10 +462,9 @@ if route_ai:
         else:
             route_coords.extend([(G.nodes[u]['y'], G.nodes[u]['x']), (G.nodes[v]['y'], G.nodes[v]['x'])])
     route_coords.append(ACTIVE_CITY["end"])
+    folium.PolyLine(route_coords, color="#00FF00", weight=6, opacity=0.9, tooltip="SECURE ROUTE").add_to(m)
 
-    folium.PolyLine(route_coords, color="#00FF00", weight=6, opacity=0.9, tooltip="AI SAFE ROUTE").add_to(m)
-
-# DRAW ROUTE B (GHOST - GREY)
+# DRAW GHOST (GREY)
 if route_ghost and st.session_state.generated_polygon and route_ghost != route_ai:
     ghost_coords = [ACTIVE_CITY["start"]]
     for i in range(len(route_ghost) - 1):
@@ -491,15 +477,7 @@ if route_ghost and st.session_state.generated_polygon and route_ghost != route_a
         else:
             ghost_coords.extend([(G.nodes[u]['y'], G.nodes[u]['x']), (G.nodes[v]['y'], G.nodes[v]['x'])])
     ghost_coords.append(ACTIVE_CITY["end"])
-
-    folium.PolyLine(
-        ghost_coords, 
-        color="#333333", # Dark Grey (High Contrast)
-        weight=5, 
-        opacity=0.8, 
-        dash_array="10, 10", 
-        tooltip="⚠️ STANDARD GPS (DANGEROUS)"
-    ).add_to(m)
+    folium.PolyLine(ghost_coords, color="#333333", weight=5, opacity=0.8, dash_array="10, 10", tooltip="STANDARD GPS").add_to(m)
 
 folium.Marker(ACTIVE_CITY["start"], icon=folium.Icon(color="green", icon="play")).add_to(m)
 folium.Marker(ACTIVE_CITY["end"], icon=folium.Icon(color="blue", icon="flag")).add_to(m)
@@ -510,23 +488,17 @@ if map_output['last_clicked']:
     clicked_lat = map_output['last_clicked']['lat']
     clicked_lng = map_output['last_clicked']['lng']
     
-    # CLICK HANDLER LOGIC
     if interaction_mode == "🔴 THREAT GENERATOR":
         if st.session_state.target_coords != (clicked_lat, clicked_lng):
             st.session_state.target_coords = (clicked_lat, clicked_lng)
-            
             poly = generate_disaster_zone(clicked_lat, clicked_lng, threat_type, intensity)
             st.session_state.generated_polygon = poly
-            
             blocked, panic = detect_impact(G, poly, threat_type)
             st.session_state.blocked_edges = blocked
             st.session_state.panic_edges = panic
-            
             st.rerun()
             
     elif interaction_mode == "⚠️ REPORT INCIDENT":
-        # Add new manual incident
-        # Check if point is new (simple de-bounce)
         new_point = (clicked_lat, clicked_lng)
         if new_point not in st.session_state.manual_incidents:
             st.session_state.manual_incidents.append(new_point)
