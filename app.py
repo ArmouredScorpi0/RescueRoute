@@ -6,500 +6,659 @@ from streamlit_folium import st_folium
 from shapely.geometry import Point, Polygon, LineString
 import random
 import math
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor
+import hashlib
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(layout="wide", page_title="RescueRoute | COMMAND OS", initial_sidebar_state="expanded")
 
-# --- 1. GLOBAL CONFIGURATION & ASSET DATABASE ---
-DEMO_CONFIG = {
-    "🇺🇸 ATLANTA (HQ)": {
-        "center": (33.7756, -84.3963),
-        "start": (33.7812, -84.3734),
-        "end": (33.7756, -84.4030),
-        "zoom": 14,
+# --- 1. THE AI BRAIN (PREDICTIVE MODELING) ---
+@st.cache_resource
+def train_ai_brain():
+    np.random.seed(42)
+    n_samples = 1500
+    
+    data = {
+        'wind_speed_kmh': np.random.uniform(0, 250, n_samples),
+        'rainfall_mm': np.random.uniform(0, 500, n_samples),   
+        'seismic_mag': np.random.uniform(4, 9, n_samples),      
+        'coastal_proximity': np.random.uniform(0, 1, n_samples), 
+        'population_density': np.random.uniform(0, 10000, n_samples) 
+    }
+    df = pd.DataFrame(data)
+    
+    df['surge_radius'] = (df['rainfall_mm'] * 0.008) + (df['coastal_proximity'] * 3.0)
+    df['wind_radius'] = (df['wind_speed_kmh'] - 60) * 0.05
+    df['wind_radius'] = df['wind_radius'].clip(lower=0)
+    df['gridlock_radius'] = (df['wind_speed_kmh'] * 0.01) + (df['population_density'] * 0.0001)
+    
+    model_surge = RandomForestRegressor(n_estimators=50).fit(df[['rainfall_mm', 'coastal_proximity']], df['surge_radius'])
+    model_wind = RandomForestRegressor(n_estimators=50).fit(df[['wind_speed_kmh']], df['wind_radius'])
+    model_gridlock = RandomForestRegressor(n_estimators=50).fit(df[['wind_speed_kmh', 'population_density']], df['gridlock_radius'])
+    
+    return model_surge, model_wind, model_gridlock
+
+with st.spinner("Initializing Neural Link... Accessing IMD Satellite Feed..."):
+    ai_surge, ai_wind, ai_gridlock = train_ai_brain()
+
+# --- 2. GEOGRAPHY & ASSETS ---
+CITY_DATABASE = {
+    "🇮🇳 MUMBAI (South)": {
+        "center": (18.9320, 72.8250), 
+        "zoom": 13,
+        "hq_virtual": {"name": "STATE DISASTER DEPOT (NDRF HQ)", "dist_km": 55, "eta_hours": 3.5},
+        "hq_marker": (18.9800, 72.8400),
+        "target_marker": (18.9000, 72.8150),
+        "target_name": "Fishermen's Colony (South Colaba)",
         "assets": [
-            {
-                "name": "Bobby Dodd Stadium", "type": "STADIUM", "coords": (33.7724, -84.3928), 
-                "cap": "High", "desc": "Heavy Airlift / Mass Shelter",
-                "supplies": ["Heavy Lift Drones", "Mass Shelter Tents (500)", "MREs (10k units)"]
-            },
-            {
-                "name": "Piedmont Park (South)", "type": "PARK", "coords": (33.7838, -84.3755), 
-                "cap": "Massive", "desc": "Field Hospital / Triage",
-                "supplies": ["Inflatable Triage Tents", "Water Tankers (5)", "Starlink Relay"]
-            },
-            {
-                "name": "Emory Midtown Hosp.", "type": "MEDICAL", "coords": (33.7692, -84.3865), 
-                "cap": "Critical", "desc": "Trauma Center / ICU",
-                "supplies": ["L1 Trauma Kits", "O- Blood Supply", "Surgical Units"]
-            },
-            {
-                "name": "Atlantic Station Deck", "type": "PARKING", "coords": (33.7922, -84.3967), 
-                "cap": "High", "desc": "Vehicle Staging / Logistics",
-                "supplies": ["Ambulance Fleet (20)", "Fuel Tankers", "Generators"]
-            },
-            {
-                "name": "Centennial Olympic Park", "type": "PARK", "coords": (33.7603, -84.3935), 
-                "cap": "Massive", "desc": "Command Post Alpha",
-                "supplies": ["Mobile Command Unit", "Radio Repeaters", "Riot Gear"]
-            },
-            {
-                "name": "Coca-Cola HQ Plaza", "type": "COMMERCIAL", "coords": (33.7709, -84.3965), 
-                "cap": "Medium", "desc": "Civilian Evac Point",
-                "supplies": ["Bus Fleet", "Water Bottles", "Blankets"]
-            }
+            {"name": "District Civil Hospital", "type": "MEDICAL", "coords": (18.9250, 72.8250), "tier": "Tier-1", "risk_profile": "HIGH"},
+            {"name": "Coastal Police HQ", "type": "LOGISTICS", "coords": (18.9200, 72.8300), "tier": "Tier-2", "risk_profile": "HIGH"},
+            {"name": "St. Xaviers University", "type": "STAGING", "coords": (18.9450, 72.8350), "tier": "Tier-1", "risk_profile": "LOW"},
+            {"name": "Central Railway Warehouse", "type": "LOGISTICS", "coords": (18.9500, 72.8400), "tier": "Tier-2", "risk_profile": "LOW"},
+            {"name": "Brabourne Stadium", "type": "SHELTER", "coords": (18.9322, 72.8275), "tier": "Tier-1", "risk_profile": "MED"}
         ]
     },
-    "🇮🇳 MUMBAI (Sector 9)": {
-        "center": (18.9320, 72.8250),
-        "start": (18.9220, 72.8347),
-        "end": (18.9430, 72.8230),
-        "zoom": 14,
+    "🇺🇸 ATLANTA (Metro)": {
+        "center": (33.7756, -84.3963),
+        "zoom": 13,
+        "hq_virtual": {"name": "GEMA STATE OPS CENTER", "dist_km": 42, "eta_hours": 2.5},
+        "hq_marker": (33.8200, -84.3800), 
+        "target_marker": (33.7400, -84.4100),
+        "target_name": "West End Community Center",
         "assets": [
-            {
-                "name": "Wankhede Stadium", "type": "STADIUM", "coords": (18.9389, 72.8258), 
-                "cap": "High", "desc": "Mass Casualty / Helipad",
-                "supplies": ["Heavy Lift Helos", "Flood Lights", "MREs (20k units)"]
-            },
-            {
-                "name": "Brabourne Stadium", "type": "STADIUM", "coords": (18.9322, 72.8275), 
-                "cap": "High", "desc": "Secondary Shelter Zone",
-                "supplies": ["Cots (2000)", "Hygiene Kits", "Water Purification"]
-            },
-            {
-                "name": "Bombay Hospital", "type": "MEDICAL", "coords": (18.9416, 72.8291), 
-                "cap": "Critical", "desc": "L1 Trauma / Surgery",
-                "supplies": ["Antivenom", "Surgical Teams", "Oxygen Tanks"]
-            },
-            {
-                "name": "Azad Maidan", "type": "PARK", "coords": (18.9360, 72.8310), 
-                "cap": "Massive", "desc": "Riot Control / Triage",
-                "supplies": ["Barricades", "Megaphones", "First Aid Posts"]
-            },
-            {
-                "name": "Cross Maidan", "type": "PARK", "coords": (18.9330, 72.8280), 
-                "cap": "High", "desc": "Logistics Hub",
-                "supplies": ["Truck Fleet", "Sandbags", "Shovels"]
-            },
-            {
-                "name": "Oval Maidan", "type": "PARK", "coords": (18.9300, 72.8280), 
-                "cap": "Massive", "desc": "Civilian Assembly Area",
-                "supplies": ["Evac Buses", "Food Packets", "Info Kiosks"]
-            }
+            {"name": "Grady Memorial Hospital", "type": "MEDICAL", "coords": (33.7513, -84.3830), "tier": "Tier-1", "risk_profile": "HIGH"},
+            {"name": "Bobby Dodd Stadium", "type": "STAGING", "coords": (33.7724, -84.3928), "tier": "Tier-1", "risk_profile": "LOW"},
+            {"name": "Piedmont Park", "type": "SHELTER", "coords": (33.7838, -84.3755), "tier": "Tier-2", "risk_profile": "MED"},
+            {"name": "Mercedes-Benz Stadium", "type": "LOGISTICS", "coords": (33.7550, -84.4000), "tier": "Tier-1", "risk_profile": "LOW"},
+            {"name": "Centennial Park", "type": "SHELTER", "coords": (33.7603, -84.3935), "tier": "Tier-2", "risk_profile": "HIGH"}
         ]
     }
 }
 
-# --- 2. SETUP ---
-st.sidebar.markdown("## 🛡️ RESCUE ROUTE | AI")
-st.sidebar.caption("v6.1")
+# --- 3. SESSION STATE ---
+if 'timeline_phase' not in st.session_state: st.session_state.timeline_phase = 1 
+if 'risk_map' not in st.session_state: st.session_state.risk_map = {"blue": None, "yellow": None, "red": None}
+if 'sim_params' not in st.session_state: st.session_state.sim_params = {}
+if 'staging_decision' not in st.session_state: st.session_state.staging_decision = None
+if 'selected_city' not in st.session_state: st.session_state.selected_city = "🇮🇳 MUMBAI (South)"
+if 'manual_blocks' not in st.session_state: st.session_state.manual_blocks = []
+if 'protocol_omega' not in st.session_state: st.session_state.protocol_omega = False
+if 'last_hazard_count' not in st.session_state: st.session_state.last_hazard_count = 0
+if 'command_mode' not in st.session_state: st.session_state.command_mode = 'THREAT'
+if 'custom_target' not in st.session_state: st.session_state.custom_target = None
+if 'previous_mode' not in st.session_state: st.session_state.previous_mode = "☢️ THREAT INJECTOR"
 
-selected_city_name = st.sidebar.selectbox(
-    "📍 Select Operation Theater",
-    list(DEMO_CONFIG.keys())
-)
-ACTIVE_CITY = DEMO_CONFIG[selected_city_name]
-
-# --- 3. DATA INGESTION ---
+# --- 4. DATA INGESTION ---
 @st.cache_resource
 def load_graph(city_name):
+    active_city = CITY_DATABASE[city_name] 
     with st.spinner(f"Downloading Satellite Data for {city_name}..."):
-        G = ox.graph_from_point(ACTIVE_CITY["center"], dist=2500, network_type='drive')
+        G = ox.graph_from_point(active_city["center"], dist=6000, network_type='drive')
         G = ox.add_edge_speeds(G)
         G = ox.add_edge_travel_times(G)
         return G
 
-G = load_graph(selected_city_name)
-
-# --- 4. SESSION STATE ---
-if 'last_city' not in st.session_state:
-    st.session_state.last_city = selected_city_name
-if st.session_state.last_city != selected_city_name:
-    st.session_state.target_coords = None
-    st.session_state.generated_polygon = None
-    st.session_state.blocked_edges = [] 
-    st.session_state.panic_edges = []   
-    st.session_state.manual_incidents = []
-    st.session_state.last_city = selected_city_name
-    st.rerun()
-
-if 'target_coords' not in st.session_state:
-    st.session_state.target_coords = None
-if 'generated_polygon' not in st.session_state:
-    st.session_state.generated_polygon = None
-if 'blocked_edges' not in st.session_state:
-    st.session_state.blocked_edges = []
-if 'panic_edges' not in st.session_state:
-    st.session_state.panic_edges = []
-if 'manual_incidents' not in st.session_state:
-    st.session_state.manual_incidents = []
-
-if 'last_threat_type' not in st.session_state:
-    st.session_state.last_threat_type = "🌊 FLOOD" 
-if 'last_intensity' not in st.session_state:
-    st.session_state.last_intensity = 5
-
-# --- 5. PHYSICS ENGINE (GENERATOR) ---
-def generate_disaster_zone(center_lat, center_lon, type, intensity):
+# --- 5. UTILITIES ---
+def generate_zone(center, radius_km, noise_level=0.1):
+    if radius_km <= 0.1: return None 
     points = []
-    num_points = 20
-    if type == "🌋 EARTHQUAKE":
-        base_radius = (intensity - 3) * 0.008 
-        for i in range(num_points):
-            angle = math.radians(float(i) / num_points * 360)
-            noise = random.uniform(0.7, 1.3) 
-            r = base_radius * noise
-            lat = center_lat + r * math.cos(angle)
-            lon = center_lon + r * math.sin(angle)
-            points.append((lon, lat))
-    else:
-        # FEATURE 1: SCIENTIFIC FLOOD METRIC
-        base_radius = intensity * 0.0000025
-        
-        for i in range(num_points):
-            angle = math.radians(float(i) / num_points * 360)
-            noise = random.uniform(0.9, 1.1)
-            r = base_radius * noise
-            lat = center_lat + r * math.cos(angle)
-            lon = center_lon + r * math.sin(angle)
-            points.append((lon, lat))
+    num_points = 30
+    base_deg = radius_km / 111.0
+    random.seed(42) 
+    
+    for i in range(num_points):
+        angle = math.radians(float(i) / num_points * 360)
+        noise = random.uniform(1.0 - noise_level, 1.0 + noise_level)
+        r = base_deg * noise
+        lat = center[0] + r * math.cos(angle)
+        lon = center[1] + r * math.sin(angle)
+        points.append((lon, lat))
     return Polygon(points)
 
-# --- 6. LOGIC ENGINE (REACTION) ---
-def detect_impact(G, hazard_poly, disaster_type):
-    compromised = []
-    panic = []
+def generate_traffic_layer(G, center_coords, gridlock_radius_km, pop_density, disaster_intensity):
+    """ Feature 2: Predictive Traffic Visualization """
+    traffic_edges = []
+    if gridlock_radius_km <= 0: return traffic_edges
     
-    panic_zone = hazard_poly.buffer(0.004) 
-    
+    spillover_radius_km = gridlock_radius_km * 1.5
+    spillover_radius_deg = spillover_radius_km / 111.0
+    center_point = Point(center_coords[1], center_coords[0])
+
+    norm_density = min(pop_density / 10000.0, 1.0)
+    norm_intensity = min(disaster_intensity / 250.0, 1.0)
+
     for u, v, k, data in G.edges(keys=True, data=True):
-        u_node = G.nodes[u]
-        point_u = Point(u_node['x'], u_node['y'])
-        
-        in_hazard = hazard_poly.contains(point_u)
-        in_panic_zone = panic_zone.contains(point_u)
-        
-        if in_hazard:
-            if disaster_type == "🌊 FLOOD":
-                compromised.append((u, v, k)) 
-            else:
-                if random.random() < 0.7: 
-                    compromised.append((u, v, k))
-                    
-        elif in_panic_zone:
-            highway_type = data.get('highway', '')
-            if isinstance(highway_type, list): 
-                highway_type = highway_type[0]
-            
-            major_roads = ['motorway', 'trunk', 'primary', 'secondary']
-            
-            if highway_type in major_roads:
-                if random.random() < 0.8:
-                    panic.append((u, v, k))
-            else:
-                if random.random() < 0.1:
-                    panic.append((u, v, k))
-                    
-    return compromised, panic
+        node_u = G.nodes[u]
+        if abs(node_u['y'] - center_coords[0]) > spillover_radius_deg * 1.2: continue
+        if abs(node_u['x'] - center_coords[1]) > spillover_radius_deg * 1.2: continue
 
-def rank_staging_areas(hazard_poly, target_lat, target_lon, assets):
-    safety_zone = hazard_poly.buffer(0.002) 
-    target_point = Point(target_lon, target_lat)
-    safe_assets = []
-    
-    for asset in assets:
-        loc = Point(asset["coords"][1], asset["coords"][0])
-        if not safety_zone.contains(loc):
-            dist = loc.distance(target_point)
-            asset["dist"] = dist
-            safe_assets.append(asset)
-            
-    safe_assets.sort(key=lambda x: x["dist"])
-    if not safe_assets: return {}
-
-    selection = {}
-    if len(safe_assets) > 0: selection["ALPHA"] = safe_assets[0]
-    
-    for asset in safe_assets:
-        if asset["type"] in ["STADIUM", "PARK"] and asset != selection.get("ALPHA"):
-            selection["BRAVO"] = asset
-            break
-            
-    for asset in safe_assets:
-        if asset["type"] == "MEDICAL" and asset != selection.get("ALPHA") and asset != selection.get("BRAVO"):
-            selection["CHARLIE"] = asset
-            break
-            
-    return selection
-
-def calculate_confidence_score(route, G, hazard_poly, manual_blocks, ghost_route=None):
-    if not route: return 0.0
-    route_points = [Point(G.nodes[n]['x'], G.nodes[n]['y']) for n in route]
-    route_line = LineString(route_points)
-    
-    # --- 1. SAFETY CHECK ---
-    intersects = route_line.intersects(hazard_poly)
-    dist_deg = hazard_poly.distance(route_line)
-    
-    # Manual Block Penalty
-    manual_penalty = 0
-    for lat, lng in manual_blocks:
-        block_point = Point(lng, lat)
-        if route_line.distance(block_point) < 0.0001: 
-            manual_penalty = 50 
-            
-    if intersects:
-        base_score = 35.5 
-    else:
-        risk_free_distance = 0.01
-        if dist_deg >= risk_free_distance:
-            base_score = 99.2
+        edge_geom = None
+        if 'geometry' in data:
+            edge_geom = data['geometry']
+            mid_idx = len(edge_geom.coords) // 2
+            mid_pt = Point(edge_geom.coords[mid_idx])
+            dist_deg = center_point.distance(mid_pt)
         else:
-            score_boost = (dist_deg / risk_free_distance) * 49.0
-            base_score = 50.0 + score_boost
+            p1 = (node_u['x'], node_u['y'])
+            p2 = (G.nodes[v]['x'], G.nodes[v]['y'])
+            edge_geom = LineString([p1, p2])
+            dist_deg = center_point.distance(Point(p1))
+        
+        dist_km = dist_deg * 111.0
+        if dist_km > spillover_radius_km: continue
+
+        proximity_factor = max(0, 1.0 - (dist_km / spillover_radius_km))
+        
+        highway = data.get('highway', '')
+        if isinstance(highway, list): highway = highway[0]
+        
+        cap_weight = 0.5 
+        if highway in ['motorway', 'trunk', 'primary', 'primary_link']: cap_weight = 1.0
+        elif highway in ['secondary', 'tertiary']: cap_weight = 0.8
+        
+        congestion_score = (norm_density * 40) + (norm_intensity * 40 * proximity_factor) + (cap_weight * 20 * proximity_factor)
+        
+        color = "#32CD32" 
+        weight = 3
+        opacity = 0.5
+        
+        if dist_km <= gridlock_radius_km:
+            if congestion_score > 60:
+                color = "#FF0000"
+                weight = 5
+                opacity = 0.8
+            elif congestion_score > 30:
+                color = "#FF4500"
+                weight = 4
+                opacity = 0.7
+        else:
+            if congestion_score > 50:
+                color = "#FFA500"
+                weight = 4
+                opacity = 0.6
+            elif congestion_score > 20:
+                color = "#FFD700"
+                weight = 3
+                opacity = 0.6
+
+        traffic_edges.append({'coords': [(lat, lon) for lon, lat in edge_geom.coords], 'color': color, 'weight': weight, 'opacity': opacity})
+            
+    return traffic_edges
+
+def calculate_confidence_score(G, route, center_coords, gridlock_radius_km, pop_density, disaster_intensity, blue_poly, red_poly):
+    """
+    Feature 4: Data-Driven Confidence Scoring
+    Calculates score based on:
+    1. Traffic Chaos (Congestion on path)
+    2. Distance Decay
+    3. Hazard Proximity
+    """
+    if not route or len(route) < 2: return 0, "No Path"
     
-    safety_score = base_score - manual_penalty
-
-    # --- 2. EFFICIENCY CHECK (NEW) ---
-    efficiency_penalty = 0
-    if ghost_route:
-        # Calculate lengths
-        ai_len = nx.path_weight(G, route, weight='length')
-        ghost_len = nx.path_weight(G, ghost_route, weight='length')
-        
-        if ghost_len > 0:
-            ratio = ai_len / ghost_len
-            # If AI route is > 20% longer, start penalizing
-            if ratio > 1.2:
-                # Cap penalty at 15 points
-                efficiency_penalty = min(15, (ratio - 1.2) * 20)
+    total_congestion = 0
+    segments = 0
+    center_point = Point(center_coords[1], center_coords[0])
     
-    final_score = safety_score - efficiency_penalty
-    return round(max(0, min(final_score, 99.4)), 1)
-
-# --- 7. SIDEBAR ---
-st.sidebar.markdown("---")
-st.sidebar.subheader("🕹️ Command Interface")
-
-interaction_mode = st.sidebar.radio("Map Interaction Mode", ["🔴 THREAT GENERATOR", "⚠️ REPORT INCIDENT"])
-
-if interaction_mode == "🔴 THREAT GENERATOR":
-    st.sidebar.caption("Click map to simulate Disaster.")
-    threat_type = st.sidebar.radio("Threat Model", ["🌊 FLOOD", "🌋 EARTHQUAKE"])
-    if threat_type == "🌊 FLOOD":
-        intensity = st.sidebar.slider("River Discharge (m³/s)", 500, 10000, 2500, step=500)
-    else:
-        intensity = st.sidebar.slider("Seismic Magnitude", 4.0, 9.0, 6.5)
-else:
-    st.sidebar.caption("Click map to report road blockage.")
-    if st.sidebar.button("Undo Last Incident"):
-        if st.session_state.manual_incidents:
-            st.session_state.manual_incidents.pop()
-            st.rerun()
-    threat_type = st.session_state.last_threat_type
-    intensity = st.session_state.last_intensity
-
-# AUTO-REFRESH LOGIC
-if st.session_state.target_coords and interaction_mode == "🔴 THREAT GENERATOR":
-    if (threat_type != st.session_state.last_threat_type) or (intensity != st.session_state.last_intensity):
-        st.session_state.last_threat_type = threat_type
-        st.session_state.last_intensity = intensity
+    # 1. Traffic Chaos Factor
+    norm_density = min(pop_density / 10000.0, 1.0)
+    norm_intensity = min(disaster_intensity / 250.0, 1.0)
+    spillover_radius_km = gridlock_radius_km * 1.5
+    
+    hazard_penalty = 0
+    
+    for u, v in zip(route[:-1], route[1:]):
+        # Get edge data
+        data = G.get_edge_data(u, v)[0]
+        node_u = G.nodes[u]
         
-        lat, lng = st.session_state.target_coords
-        poly = generate_disaster_zone(lat, lng, threat_type, intensity)
-        st.session_state.generated_polygon = poly
+        # Calculate distance from disaster center
+        p1 = Point(node_u['x'], node_u['y'])
+        dist_deg = center_point.distance(p1)
+        dist_km = dist_deg * 111.0
         
-        blocked, panic = detect_impact(G, poly, threat_type)
-        st.session_state.blocked_edges = blocked
-        st.session_state.panic_edges = panic
-        st.rerun()
+        # Congestion Math (Same as Traffic Layer)
+        proximity_factor = max(0, 1.0 - (dist_km / spillover_radius_km))
+        
+        highway = data.get('highway', '')
+        if isinstance(highway, list): highway = highway[0]
+        cap_weight = 0.5 
+        if highway in ['motorway', 'trunk', 'primary']: cap_weight = 1.0
+        
+        # Calculate raw congestion for this segment
+        segment_congestion = (norm_density * 40) + (norm_intensity * 40 * proximity_factor) + (cap_weight * 20 * proximity_factor)
+        total_congestion += segment_congestion
+        segments += 1
+        
+        # 3. Hazard Proximity Check
+        # Check if this specific point is suspiciously close to a polygon (even if safe)
+        if blue_poly and blue_poly.distance(p1) < 0.005: # ~500m
+            hazard_penalty = max(hazard_penalty, 20) # Near Flood
+        if red_poly and red_poly.distance(p1) < 0.005:
+            hazard_penalty = max(hazard_penalty, 15) # Near Gridlock
 
-st.sidebar.markdown("---")
-if st.sidebar.button("🟢 RESET SIMULATION"):
-    st.session_state.target_coords = None
-    st.session_state.generated_polygon = None
-    st.session_state.blocked_edges = []
-    st.session_state.panic_edges = []
-    st.session_state.manual_incidents = []
+    avg_congestion = total_congestion / max(1, segments)
+    
+    # 2. Distance Decay
+    total_dist_km = nx.path_weight(G, route, weight='length') / 1000.0
+    dist_penalty = total_dist_km * 0.5 # -0.5% per km
+    
+    # Final Formula
+    # Base 100 - (Chaos * 0.4) - Distance - Hazard Risk
+    raw_score = 100 - (avg_congestion * 0.4) - dist_penalty - hazard_penalty
+    final_score = max(10, min(99, int(raw_score))) # Clamp between 10 and 99
+    
+    reason = "Optimal Conditions"
+    if hazard_penalty > 15: reason = "High Hazard Proximity"
+    elif avg_congestion > 50: reason = "Heavy Congestion Expected"
+    elif dist_penalty > 15: reason = "Long-Range Logistics Risk"
+    
+    return final_score, reason
+
+def vet_assets(assets, blue_poly, yellow_poly, red_poly):
+    vetted = []
+    safe_count = 0
+    for asset in assets:
+        pt = Point(asset['coords'][1], asset['coords'][0])
+        status, color, reason = "SECURE", "green", "Optimal Location"
+        
+        if blue_poly and blue_poly.contains(pt):
+            status, color, reason = "CRITICAL RISK", "red", "Inside Flood Surge Zone"
+        elif red_poly and red_poly.contains(pt):
+            status, color, reason = "GRIDLOCKED", "purple", "Inside Panic Traffic Zone"
+        elif yellow_poly and yellow_poly.contains(pt):
+            status, color, reason = "HIGH RISK", "orange", "Wind Damage Risk"
+        else:
+            safe_count += 1
+            
+        asset.update({'status': status, 'color': color, 'reason': reason})
+        vetted.append(asset)
+    return vetted, safe_count
+
+def get_routing_graph(G, blue_poly, red_poly, manual_blocks, risk_penalty=50):
+    G_routing = G.copy()
+    
+    # 1. Environmental Hazards (Flood) - Always Impassable (Physics)
+    if blue_poly:
+        for u, v, k, data in G_routing.edges(keys=True, data=True):
+            pt = Point(G_routing.nodes[u]['x'], G_routing.nodes[u]['y'])
+            if blue_poly.contains(pt):
+                G_routing[u][v][k]['length'] = 1e9 
+                
+    # 2. Chaos/Gridlock (Red) - Variable Penalty
+    if red_poly:
+        for u, v, k, data in G_routing.edges(keys=True, data=True):
+            pt = Point(G_routing.nodes[u]['x'], G_routing.nodes[u]['y'])
+            if red_poly.contains(pt):
+                G_routing[u][v][k]['length'] *= risk_penalty 
+    
+    # 3. Dynamic Hazards (Manual Blocks) - Variable Penalty
+    for lat, lng in manual_blocks:
+        u, v, k = ox.nearest_edges(G, lng, lat)
+        if G_routing.has_edge(u, v, k):
+            G_routing[u][v][k]['length'] *= risk_penalty
+            
+    return G_routing
+
+# --- 6. SIDEBAR: MISSION CONTROL ---
+st.sidebar.title("🚨 COMMAND OS")
+st.sidebar.caption("Operation Samudra Raksha")
+
+# GLOBAL RESET
+if st.sidebar.button("🔄 GLOBAL RESET"):
+    st.session_state.timeline_phase = 1
+    st.session_state.risk_map = {"blue": None, "yellow": None, "red": None}
+    st.session_state.staging_decision = None
+    st.session_state.manual_blocks = []
+    st.session_state.protocol_omega = False
+    st.session_state.sim_params = {}
+    st.session_state.custom_target = None
     st.rerun()
 
-# --- 8. ROUTING ENGINE ---
-orig_node = ox.nearest_nodes(G, ACTIVE_CITY["start"][1], ACTIVE_CITY["start"][0])
-dest_node = ox.nearest_nodes(G, ACTIVE_CITY["end"][1], ACTIVE_CITY["end"][0])
-
-# --- ROUTE A: THE GHOST (Standard GPS) ---
-try:
-    route_ghost = nx.shortest_path(G, orig_node, dest_node, weight='length')
-except nx.NetworkXNoPath:
-    route_ghost = None
-
-# --- ROUTE B: AI SECURE (The One True Path) ---
-G_secure = G.copy()
-for u, v, k in st.session_state.blocked_edges:
-    if G_secure.has_edge(u, v, k):
-        G_secure[u][v][k]['length'] = 1e9 # Effectively blocked
-for u, v, k in st.session_state.panic_edges:
-    if G_secure.has_edge(u, v, k):
-        G_secure[u][v][k]['length'] = G_secure[u][v][k].get('length', 10) * 50 # High penalty
-# Manual Blocks
-for lat, lng in st.session_state.manual_incidents:
-    block_node = ox.nearest_nodes(G, lng, lat)
-    for u, v, k in G_secure.edges(block_node, keys=True):
-        G_secure[u][v][k]['length'] = 1e9
-
-try:
-    route_ai = nx.shortest_path(G_secure, orig_node, dest_node, weight='length')
-except nx.NetworkXNoPath:
-    route_ai = None
-
-# --- 9. VISUALIZATION & METRICS ---
-st.title(f"Command Center: {selected_city_name}")
-
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("System Status", "ONLINE", delta="Local: 12ms")
-
-if st.session_state.target_coords:
-    m2.metric("Target Locked", "ACTIVE", delta="Tracking")
-    total_impact = len(st.session_state.blocked_edges) + len(st.session_state.panic_edges) + len(st.session_state.manual_incidents)
-    m3.metric("Infra. Impact", f"{total_impact} Segments", delta="CRITICAL", delta_color="inverse")
+if st.session_state.timeline_phase == 1:
+    new_city = st.sidebar.selectbox("📍 Operation Theater", list(CITY_DATABASE.keys()), index=list(CITY_DATABASE.keys()).index(st.session_state.selected_city))
+    if new_city != st.session_state.selected_city:
+        st.session_state.selected_city = new_city
+        st.session_state.risk_map = {"blue": None, "yellow": None, "red": None}
+        st.session_state.sim_params = {}
+        st.rerun()
 else:
-    m2.metric("Targeting System", "STANDBY", delta_color="off")
-    m3.metric("Infra. Impact", "0", delta_color="off")
+    st.sidebar.info(f"📍 Theater: {st.session_state.selected_city}")
 
-# METRICS DISPLAY
-if route_ai:
-    # Calculate Real Distances
-    dist_ai = nx.path_weight(G, route_ai, weight='length')
-    eta_ai = int((dist_ai / 11.0) / 60)
+ACTIVE_CITY = CITY_DATABASE[st.session_state.selected_city]
+G = load_graph(st.session_state.selected_city)
+
+# PHASE 1
+st.sidebar.header("1. Situation Room (T-2 Hours)")
+if st.session_state.timeline_phase == 1:
+    in_wind = st.sidebar.slider("🌪️ Cyclone Wind Speed (km/h)", 0, 250, 0)
+    in_rain = st.sidebar.slider("🌧️ Rain Intensity (mm/hr)", 0, 200, 0)
+    in_pop = st.sidebar.slider("👥 Population Density", 0, 10000, 5000)
     
-    poly = st.session_state.generated_polygon
-    if poly:
-        # Pass ghost route for efficiency comparison
-        confidence = calculate_confidence_score(route_ai, G, poly, st.session_state.manual_incidents, route_ghost)
-        total_hazards = len(st.session_state.blocked_edges) + len(st.session_state.panic_edges) + len(st.session_state.manual_incidents)
-        
-        if route_ai == route_ghost:
-            m4.metric("AI Confidence", f"{confidence}%", delta="Standard Route Safe", delta_color="normal")
-            st.success(f"✅ **ROUTE CLEARED:** {eta_ai} mins | Standard Corridor is Secure")
-        else:
-            # Ghost comparison logic
-            ghost_score = calculate_confidence_score(route_ghost, G, poly, st.session_state.manual_incidents, None)
-            if ghost_score < 40:
-                ghost_status = "CRITICAL FAIL"
-                ghost_delta = "inverse"
-            else:
-                ghost_status = "HIGH RISK"
-                ghost_delta = "off"
-            
-            m4.metric("AI Confidence", f"{confidence}%", delta=f"vs Std GPS: {ghost_status}", delta_color="normal")
-            st.success(f"✅ **AI REROUTE ACTIVE:** {eta_ai} mins | Avoids {total_hazards} Hazards")
-            st.warning(f"⚠️ **STANDARD GPS (GREY):** {ghost_status} | Route Compromised")
-            
+    input_surge = pd.DataFrame({'rainfall_mm': [in_rain], 'coastal_proximity': [1.0]})
+    input_wind = pd.DataFrame({'wind_speed_kmh': [in_wind]})
+    input_gridlock = pd.DataFrame({'wind_speed_kmh': [in_wind], 'population_density': [in_pop]})
+
+    pred_surge = ai_surge.predict(input_surge)[0] 
+    pred_wind = ai_wind.predict(input_wind)[0]
+    pred_gridlock_radius = ai_gridlock.predict(input_gridlock)[0]
+    
+    if in_wind < 40 and in_rain < 10:
+        pred_surge, pred_wind, pred_gridlock_radius = 0, 0, 0
+        st.sidebar.success("✅ SENSORS CLEAR")
     else:
-        m4.metric("AI Confidence", "100%", delta="Baseline")
-        st.info(f"🚀 **OPTIMAL ROUTE:** {eta_ai} mins")
+        st.sidebar.warning("⚠️ THREAT DETECTED")
+    
+    if st.sidebar.button("GENERATE RISK MAP"):
+        blue = generate_zone(ACTIVE_CITY["center"], pred_surge, 0.2)
+        yellow = generate_zone(ACTIVE_CITY["center"], pred_wind, 0.05)
+        red = generate_zone(ACTIVE_CITY["center"], pred_gridlock_radius, 0.1)
+        st.session_state.risk_map = {"blue": blue, "yellow": yellow, "red": red}
+        st.session_state.sim_params = {"radius_km": pred_gridlock_radius, "density": in_pop, "intensity": in_wind}
+        st.session_state.timeline_phase = 2 
+        st.rerun()
 
+# PHASE 2 (Pre-positioning)
+elif st.session_state.timeline_phase == 2:
+    st.sidebar.success("✅ Risk Map Generated")
+    st.sidebar.markdown("---")
+    st.sidebar.header("2. The Golden Hour (T-1 Hour)")
+    
+    vetted_assets, safe_count = vet_assets(ACTIVE_CITY["assets"], st.session_state.risk_map["blue"], st.session_state.risk_map["yellow"], st.session_state.risk_map["red"])
+    
+    st.sidebar.subheader("♟️ Strategic Intelligence")
+    
+    if safe_count == 0:
+        st.sidebar.error("🚨 CRITICAL: ALL LOCAL ASSETS COMPROMISED")
+        st.sidebar.warning("⚠️ PROTOCOL OMEGA ACTIVATED")
+        if st.sidebar.button("🚀 AUTHORIZE PROTOCOL OMEGA"):
+            st.session_state.staging_decision = {"name": ACTIVE_CITY['hq_virtual']['name'], "coords": ACTIVE_CITY["hq_marker"], "type": "VIRTUAL_HQ"}
+            st.session_state.protocol_omega = True
+            st.rerun()
+    else:
+        st.sidebar.info(f"{safe_count} Safe Staging Areas Identified")
+        st.sidebar.caption("AI Vetting Report:")
+        for asset in vetted_assets:
+            if asset['status'] == "SECURE":
+                if st.sidebar.button(f"✅ Deploy to: {asset['name']}"):
+                    st.session_state.staging_decision = asset
+                    st.rerun()
+            elif asset['status'] == "CRITICAL RISK":
+                st.sidebar.error(f"❌ {asset['name']} (Flooded)")
+            elif asset['status'] == "GRIDLOCKED":
+                st.sidebar.warning(f"⚠️ {asset['name']} (Gridlock)")
+
+    if st.session_state.staging_decision:
+        if st.session_state.protocol_omega:
+             st.sidebar.warning(f"⚠️ Rerouting to: {st.session_state.staging_decision['name']}")
+        else:
+             st.sidebar.success(f"Confirmed: {st.session_state.staging_decision['name']}")
+             st.sidebar.info("✅ SECURE INGRESS ROUTE ESTABLISHED")
+             
+        if st.sidebar.button("🔴 TRIGGER LANDFALL"):
+            st.session_state.timeline_phase = 3
+            st.rerun()
+
+# PHASE 3 (Reactive Response & Blue Corridor)
+elif st.session_state.timeline_phase == 3:
+    if st.session_state.protocol_omega:
+        st.sidebar.error("⚠️ PROTOCOL OMEGA ACTIVE")
+        st.sidebar.caption("Local infrastructure collapse verified. Command transferred to State Ops.")
+    else:
+        st.sidebar.error("⚡ LANDFALL CONFIRMED (T+0)")
+        
+    st.sidebar.markdown("---")
+    st.sidebar.header("3. Reactive Response")
+    st.sidebar.markdown(f"**🎯 TARGET:** {ACTIVE_CITY['target_name']}")
+    
+    # PHASE 3.1: Command Mode Toggle
+    st.sidebar.subheader("🎮 Ops Mode")
+    mode = st.sidebar.radio("Map Interaction:", ["☢️ THREAT INJECTOR", "🎯 MISSION PLANNING"])
+    
+    if mode != st.session_state.previous_mode:
+        st.toast(f"Switched to {mode}", icon="🎮")
+        st.session_state.previous_mode = mode
+    
+    if mode == "☢️ THREAT INJECTOR":
+        st.session_state.command_mode = 'THREAT'
+        st.sidebar.info("Click MAP to spawn hazards (Fire/Collapse).")
+        if st.session_state.manual_blocks:
+            st.sidebar.warning(f"{len(st.session_state.manual_blocks)} Hazards Active")
+            if st.sidebar.button("Undo Last Hazard"):
+                st.session_state.manual_blocks.pop()
+                st.rerun()
+    else:
+        st.session_state.command_mode = 'MISSION'
+        st.sidebar.info("Click MAP to set new Rescue Target.")
+        if st.session_state.custom_target:
+            st.sidebar.success("Target Locked: Custom Coords")
+            if st.sidebar.button("Reset Target"):
+                st.session_state.custom_target = None
+                st.rerun()
+
+# --- 7. MAIN DISPLAY ---
+if st.session_state.protocol_omega and st.session_state.timeline_phase == 3:
+    st.error("CRITICAL FAILURE: LOCAL INFRASTRUCTURE COLLAPSED. INITIATING PROTOCOL OMEGA.")
+    st.title(f"Command Center: STATE OPS -> {st.session_state.selected_city}")
 else:
-    m4.metric("AI Confidence", "0%", delta="PATH LOST", delta_color="inverse")
+    st.title(f"Command Center: {st.session_state.selected_city}")
 
+# ROUTING LOGIC
+route_local, route_blue_corridor = None, None
+confidence_score, confidence_reason = 0, "N/A"
+
+if st.session_state.timeline_phase == 3 and st.session_state.staging_decision:
+    G_safe = get_routing_graph(G, st.session_state.risk_map["blue"], st.session_state.risk_map["red"], st.session_state.manual_blocks, risk_penalty=100)
+    
+    if st.session_state.custom_target:
+        target_lat, target_lng = st.session_state.custom_target
+        target_node = ox.nearest_nodes(G, target_lng, target_lat)
+    else:
+        target_node = ox.nearest_nodes(G, ACTIVE_CITY["target_marker"][1], ACTIVE_CITY["target_marker"][0])
+
+    hq_node = ox.nearest_nodes(G, ACTIVE_CITY["hq_marker"][1], ACTIVE_CITY["hq_marker"][0])
+    staging_coords = st.session_state.staging_decision['coords']
+    staging_node = ox.nearest_nodes(G, staging_coords[1], staging_coords[0])
+
+    # SCENARIO 1: PROTOCOL OMEGA
+    if st.session_state.protocol_omega:
+        try: 
+            route_blue_corridor = nx.shortest_path(G_safe, hq_node, target_node, weight='length')
+            # Calculate Confidence for the Omega Route
+            confidence_score, confidence_reason = calculate_confidence_score(
+                G, route_blue_corridor, ACTIVE_CITY["center"], 
+                st.session_state.sim_params["radius_km"], 
+                st.session_state.sim_params["density"], 
+                st.session_state.sim_params["intensity"],
+                st.session_state.risk_map["blue"], 
+                st.session_state.risk_map["red"]
+            )
+        except: pass
+
+    # SCENARIO 2: NORMAL OPS
+    else:
+        try: route_blue_corridor = nx.shortest_path(G_safe, hq_node, staging_node, weight='length')
+        except: pass
+        try: 
+            route_local = nx.shortest_path(G_safe, staging_node, target_node, weight='length')
+            # Calculate Confidence for the Local Route
+            confidence_score, confidence_reason = calculate_confidence_score(
+                G, route_local, ACTIVE_CITY["center"], 
+                st.session_state.sim_params["radius_km"], 
+                st.session_state.sim_params["density"], 
+                st.session_state.sim_params["intensity"],
+                st.session_state.risk_map["blue"], 
+                st.session_state.risk_map["red"]
+            )
+        except: 
+            pass
+
+    # Check manual blocks for toast
+    if len(st.session_state.manual_blocks) > st.session_state.last_hazard_count:
+        st.toast("⚠️ Hazard Detected! Recalculating Logistics Chain...", icon="🔄")
+        st.session_state.last_hazard_count = len(st.session_state.manual_blocks)
+
+# METRICS
+c1, c2, c3 = st.columns(3)
+if st.session_state.timeline_phase == 1:
+    c1.metric("Status", "MONITORING", delta="T-Minus 2 Hours")
+    c2.metric("Threat Level", "ELEVATED", delta_color="inverse")
+    c3.metric("Golden Hour", "OPEN", delta="Act Now")
+elif st.session_state.timeline_phase == 2:
+    c1.metric("Status", "PRE-POSITIONING", delta="T-Minus 1 Hour", delta_color="off")
+    if st.session_state.staging_decision:
+        status = "PROTOCOL OMEGA" if st.session_state.protocol_omega else "SECURE"
+        c2.metric("Unit Location", "STAGING AREA", delta=status)
+        c3.metric("Readiness", "100%", delta="Golden Hour Secured")
+    else:
+        c2.metric("Unit Location", "DISTANT HQ", delta="-55 km", delta_color="inverse")
+        c3.metric("Readiness", "CRITICAL", delta="Deployment Required", delta_color="inverse")
+elif st.session_state.timeline_phase == 3:
+    if st.session_state.protocol_omega:
+         c1.metric("Status", "TOTAL FAILURE", delta="Fail-Safe Active", delta_color="inverse")
+    else:
+         c1.metric("Status", "REACTIVE RESPONSE", delta="T+1 Hour", delta_color="inverse")
+    
+    if route_blue_corridor and st.session_state.protocol_omega:
+        dist_display_val = int(nx.path_weight(G, route_blue_corridor, weight='length') / 1000)
+        c2.metric("Rescue Route", f"{dist_display_val} km", delta="LONG-RANGE")
+        
+        # Phase 4 Metric: Confidence Score
+        delta_color = "normal" if confidence_score > 80 else "off" if confidence_score > 50 else "inverse"
+        c3.metric("AI Confidence", f"{confidence_score}%", delta=confidence_reason, delta_color=delta_color)
+        
+    elif route_local:
+        safe_km = int(nx.path_weight(G, route_local, weight='length') / 1000)
+        c2.metric("Rescue Route", f"{safe_km} km", delta="OPTIMAL")
+        
+        # Phase 4 Metric: Confidence Score
+        delta_color = "normal" if confidence_score > 80 else "off" if confidence_score > 50 else "inverse"
+        c3.metric("AI Confidence", f"{confidence_score}%", delta=confidence_reason, delta_color=delta_color)
+        
+    else:
+        c2.metric("Rescue Route", "BLOCKED", delta="No Viable Path", delta_color="inverse")
+        c3.metric("Ingress Security", "CRITICAL", delta="Path Failed", delta_color="inverse")
+
+# MAP RENDERING
 m = folium.Map(location=ACTIVE_CITY["center"], zoom_start=ACTIVE_CITY["zoom"], tiles="Cartodb Positron")
 
-# DRAW DISASTER
-if st.session_state.generated_polygon:
-    fill_color = "#0000FF" if threat_type == "🌊 FLOOD" else "#8B4513"
-    folium.GeoJson(
-        st.session_state.generated_polygon,
-        style_function=lambda x: {'fillColor': fill_color, 'color': fill_color, 'weight': 2, 'fillOpacity': 0.4}
-    ).add_to(m)
+if st.session_state.risk_map["red"] and st.session_state.sim_params:
+    params = st.session_state.sim_params
+    traffic_lines = generate_traffic_layer(G, ACTIVE_CITY["center"], params["radius_km"], params["density"], params["intensity"])
+    for road in traffic_lines:
+        folium.PolyLine(road['coords'], color=road['color'], weight=road['weight'], opacity=road['opacity']).add_to(m)
+
+for zone, color, tooltip in [("yellow", "#FFD700", "Wind"), ("blue", "#00BFFF", "Flood")]:
+    if st.session_state.risk_map[zone]:
+        folium.GeoJson(st.session_state.risk_map[zone], 
+                       style_function=lambda x, c=color: {'fillColor': c, 'color': 'none', 'fillOpacity': 0.3}, 
+                       tooltip=tooltip,
+                       interactive=False).add_to(m)
+
+folium.Marker(ACTIVE_CITY["hq_marker"], icon=folium.Icon(color="gray", icon="home"), tooltip="External HQ (Start)").add_to(m)
+
+if st.session_state.timeline_phase >= 2:
+    vetted, _ = vet_assets(ACTIVE_CITY["assets"], st.session_state.risk_map["blue"], st.session_state.risk_map["yellow"], st.session_state.risk_map["red"])
+    for asset in vetted:
+        color = "blue" if st.session_state.staging_decision and st.session_state.staging_decision['name'] == asset['name'] else asset['color']
+        if color == "purple": color = "darkpurple"
+        folium.Marker(asset['coords'], icon=folium.Icon(color=color, icon="info-sign"), tooltip=f"{asset['name']} ({asset['status']})").add_to(m)
+
+if st.session_state.timeline_phase == 2 and st.session_state.staging_decision:
+    G_deploy = get_routing_graph(G, st.session_state.risk_map["blue"], st.session_state.risk_map["red"], [], risk_penalty=100) 
+    hq_node = ox.nearest_nodes(G, ACTIVE_CITY["hq_marker"][1], ACTIVE_CITY["hq_marker"][0])
+    staging_coords = st.session_state.staging_decision['coords']
+    staging_node = ox.nearest_nodes(G, staging_coords[1], staging_coords[0])
+    try:
+        route_ingress = nx.shortest_path(G_deploy, hq_node, staging_node, weight='length')
+        coords = [ACTIVE_CITY["hq_marker"]]
+        for u, v in zip(route_ingress[:-1], route_ingress[1:]):
+            data = G[u][v][0]
+            if 'geometry' in data: 
+                line_coords = [(lat, lon) for lon, lat in data['geometry'].coords]
+                coords.extend(line_coords)
+            else: 
+                coords.extend([(G.nodes[u]['y'], G.nodes[u]['x']), (G.nodes[v]['y'], G.nodes[v]['x'])])
+        folium.PolyLine(coords, color="#00f0ff", weight=6, opacity=0.9, tooltip="SECURE INGRESS ROUTE", dash_array="1, 10").add_to(m)
+        folium.PolyLine(coords, color="#00f0ff", weight=12, opacity=0.3).add_to(m)
+        m.fit_bounds(coords)
+    except:
+        line = [ACTIVE_CITY["hq_marker"], st.session_state.staging_decision['coords']]
+        folium.PolyLine(line, color="red", weight=4, dash_array="5, 5", tooltip="NO VALID INGRESS ROUTE").add_to(m)
+    folium.Marker(st.session_state.staging_decision['coords'], icon=folium.Icon(color="green", icon="play"), tooltip="UNIT DEPLOYED").add_to(m)
+
+if st.session_state.timeline_phase == 3:
+    if st.session_state.custom_target:
+        folium.Marker(st.session_state.custom_target, icon=folium.Icon(color="red", icon="flag"), tooltip="DYNAMIC TARGET").add_to(m)
+    else:
+        folium.Marker(ACTIVE_CITY["target_marker"], icon=folium.Icon(color="red", icon="flag"), tooltip="TARGET").add_to(m)
     
-    staging = rank_staging_areas(st.session_state.generated_polygon, ACTIVE_CITY["end"][0], ACTIVE_CITY["end"][1], ACTIVE_CITY["assets"])
-    
-    if "ALPHA" in staging:
-        a = staging["ALPHA"]
-        supplies_str = "<br>• ".join(a['supplies'])
-        folium.Marker(a["coords"], icon=folium.Icon(color="red", icon="bolt", prefix="fa"), popup=f"<div style='min-width: 300px;'><h5>⚡ ALPHA</h5><hr>{supplies_str}</div>").add_to(m)
-    if "BRAVO" in staging:
-        b = staging["BRAVO"]
-        supplies_str = "<br>• ".join(b['supplies'])
-        folium.Marker(b["coords"], icon=folium.Icon(color="orange", icon="helicopter", prefix="fa"), popup=f"<div style='min-width: 300px;'><h5>🚁 BRAVO</h5><hr>{supplies_str}</div>").add_to(m)
-    if "CHARLIE" in staging:
-        c = staging["CHARLIE"]
-        supplies_str = "<br>• ".join(c['supplies'])
-        folium.Marker(c["coords"], icon=folium.Icon(color="green", icon="user-md", prefix="fa"), popup=f"<div style='min-width: 300px;'><h5>🏥 CHARLIE</h5><hr>{supplies_str}</div>").add_to(m)
+    for lat, lng in st.session_state.manual_blocks:
+        folium.Marker([lat, lng], icon=folium.Icon(color="black", icon="fire", prefix="fa"), tooltip="Hazard (Blocking Path)").add_to(m)
         
-    folium.Marker(st.session_state.target_coords, icon=folium.Icon(color="red", icon="crosshairs", prefix="fa")).add_to(m)
+    all_points = []
+    if route_blue_corridor:
+        coords = [ACTIVE_CITY["hq_marker"]]
+        for u, v in zip(route_blue_corridor[:-1], route_blue_corridor[1:]):
+            data = G[u][v][0]
+            if 'geometry' in data: 
+                line_coords = [(lat, lon) for lon, lat in data['geometry'].coords]
+                coords.extend(line_coords)
+            else: 
+                coords.extend([(G.nodes[u]['y'], G.nodes[u]['x']), (G.nodes[v]['y'], G.nodes[v]['x'])])
+        all_points.extend(coords)
+        tooltip_txt = "BLUE CORRIDOR (Protocol Omega)" if st.session_state.protocol_omega else "SECURE INGRESS ROUTE"
+        folium.PolyLine(coords, color="#00f0ff", weight=6, opacity=0.9, tooltip=tooltip_txt, dash_array="1, 10").add_to(m)
+        folium.PolyLine(coords, color="#00f0ff", weight=12, opacity=0.3).add_to(m)
+        
+    if route_local and not st.session_state.protocol_omega:
+        coords = [st.session_state.staging_decision['coords']]
+        for u, v in zip(route_local[:-1], route_local[1:]):
+            data = G[u][v][0]
+            if 'geometry' in data: 
+                line_coords = [(lat, lon) for lon, lat in data['geometry'].coords]
+                coords.extend(line_coords)
+            else: 
+                coords.extend([(G.nodes[u]['y'], G.nodes[u]['x']), (G.nodes[v]['y'], G.nodes[v]['x'])])
+        all_points.extend(coords)
+        folium.PolyLine(coords, color="#00FF00", weight=6, opacity=0.9, tooltip="Local Rescue Route").add_to(m)
+        
+    if all_points:
+        m.fit_bounds(all_points)
 
-else:
+map_output = st_folium(m, width=1200, height=600, returned_objects=["last_object_clicked_tooltip", "last_clicked"])
+
+if st.session_state.timeline_phase == 2 and map_output['last_object_clicked_tooltip']:
+    clicked_name = map_output['last_object_clicked_tooltip'].split(" (")[0]
     for asset in ACTIVE_CITY["assets"]:
-        folium.Marker(asset["coords"], icon=folium.Icon(color="gray", icon="info-sign"), popup=asset['name']).add_to(m)
+        if asset['name'] == clicked_name:
+            if asset['color'] in ["red", "purple"]: st.toast("🚫 Unsafe for Staging!")
+            else: 
+                st.session_state.staging_decision = asset
+                st.rerun()
 
-# DRAW IMPACT EDGES
-fail_color = "#0000cc" if threat_type == "🌊 FLOOD" else "#4a3c31"
-for u, v, k in st.session_state.blocked_edges:
-    if G.has_edge(u, v, k):
-        coords = [[G.nodes[u]['y'], G.nodes[u]['x']], [G.nodes[v]['y'], G.nodes[v]['x']]]
-        folium.PolyLine(coords, color=fail_color, weight=3, opacity=0.8).add_to(m)
+elif st.session_state.timeline_phase == 3 and map_output['last_clicked']:
+    lat, lng = map_output['last_clicked']['lat'], map_output['last_clicked']['lng']
+    if st.session_state.command_mode == 'THREAT':
+        st.session_state.manual_blocks.append((lat, lng))
+        st.toast("🔥 Hazard Injected", icon="🔥")
+        st.rerun()
+    elif st.session_state.command_mode == 'MISSION':
+        try:
+            target_node = ox.nearest_nodes(G, lng, lat)
+            node_data = G.nodes[target_node]
+            node_pt = Point(node_data['x'], node_data['y'])
+            click_pt = Point(lng, lat)
+            dist_deg = node_pt.distance(click_pt)
+            dist_km = dist_deg * 111.0 
+            if dist_km > 2.0:
+                st.toast("🚫 Target Unreachable: Too far from road network", icon="🌊")
+            else:
+                st.session_state.custom_target = (lat, lng)
+                st.toast("🎯 New Mission Target Set", icon="🎯")
+                st.rerun()
+        except Exception as e:
+             st.toast("🚫 Error resolving target location", icon="⚠️")
 
-for u, v, k in st.session_state.panic_edges:
-    if G.has_edge(u, v, k):
-        coords = [[G.nodes[u]['y'], G.nodes[u]['x']], [G.nodes[v]['y'], G.nodes[v]['x']]]
-        folium.PolyLine(coords, color="#FFA500", weight=4, opacity=0.7).add_to(m)
-
-# MANUAL INCIDENTS
-for lat, lng in st.session_state.manual_incidents:
-    folium.Marker([lat, lng], icon=folium.Icon(color="black", icon="ban", prefix="fa"), tooltip="INCIDENT").add_to(m)
-
-# DRAW ROUTE A (SECURE - GREEN)
-if route_ai:
-    route_coords = [ACTIVE_CITY["start"]]
-    for i in range(len(route_ai) - 1):
-        u = route_ai[i]
-        v = route_ai[i+1]
-        edge_data = G[u][v][0] 
-        if 'geometry' in edge_data:
-            geo_coords = [(lat, lon) for lon, lat in edge_data['geometry'].coords]
-            route_coords.extend(geo_coords)
-        else:
-            route_coords.extend([(G.nodes[u]['y'], G.nodes[u]['x']), (G.nodes[v]['y'], G.nodes[v]['x'])])
-    route_coords.append(ACTIVE_CITY["end"])
-    folium.PolyLine(route_coords, color="#00FF00", weight=6, opacity=0.9, tooltip="SECURE ROUTE").add_to(m)
-
-# DRAW GHOST (GREY)
-if route_ghost and st.session_state.generated_polygon and route_ghost != route_ai:
-    ghost_coords = [ACTIVE_CITY["start"]]
-    for i in range(len(route_ghost) - 1):
-        u = route_ghost[i]
-        v = route_ghost[i+1]
-        edge_data = G[u][v][0] 
-        if 'geometry' in edge_data:
-            geo_coords = [(lat, lon) for lon, lat in edge_data['geometry'].coords]
-            ghost_coords.extend(geo_coords)
-        else:
-            ghost_coords.extend([(G.nodes[u]['y'], G.nodes[u]['x']), (G.nodes[v]['y'], G.nodes[v]['x'])])
-    ghost_coords.append(ACTIVE_CITY["end"])
-    folium.PolyLine(ghost_coords, color="#333333", weight=5, opacity=0.8, dash_array="10, 10", tooltip="STANDARD GPS").add_to(m)
-
-folium.Marker(ACTIVE_CITY["start"], icon=folium.Icon(color="green", icon="play")).add_to(m)
-folium.Marker(ACTIVE_CITY["end"], icon=folium.Icon(color="blue", icon="flag")).add_to(m)
-
-map_output = st_folium(m, width=1000, height=500, returned_objects=["last_clicked"])
-
-if map_output['last_clicked']:
-    clicked_lat = map_output['last_clicked']['lat']
-    clicked_lng = map_output['last_clicked']['lng']
-    
-    if interaction_mode == "🔴 THREAT GENERATOR":
-        if st.session_state.target_coords != (clicked_lat, clicked_lng):
-            st.session_state.target_coords = (clicked_lat, clicked_lng)
-            poly = generate_disaster_zone(clicked_lat, clicked_lng, threat_type, intensity)
-            st.session_state.generated_polygon = poly
-            blocked, panic = detect_impact(G, poly, threat_type)
-            st.session_state.blocked_edges = blocked
-            st.session_state.panic_edges = panic
-            st.rerun()
-            
-    elif interaction_mode == "⚠️ REPORT INCIDENT":
-        new_point = (clicked_lat, clicked_lng)
-        if new_point not in st.session_state.manual_incidents:
-            st.session_state.manual_incidents.append(new_point)
-            st.rerun()
+st.info("ℹ️ **MISSION:** 1. Generate Risk Map 2. Deploy via Sidebar (or Authorize Omega) 3. Trigger Landfall")
